@@ -16,4 +16,6 @@ pip install \
     gradio>=4.0 \
     pytest>=8.0
 
+echo "Installing project as editable package..."
+pip install -e .
 echo "Setup complete."
