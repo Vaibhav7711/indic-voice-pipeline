@@ -132,7 +132,7 @@ class WhisperDecoder:
         end.synchronize()
 
         next_token = outputs.logits[:, -1, :].argmax(dim=-1, keepdim=True)
-        new_decoded = state.decoded_tokens + [int(state.next_token.item())]
+        new_decoded = list(state.decoded_tokens)
 
         return DecoderState(
             past_key_values=outputs.past_key_values,

@@ -161,12 +161,17 @@ class ASRRunner:
 
         for step in range(max_new_tokens):
             token_id = int(state.next_token.item())
-            state.decoded_tokens.append(token_id)
             if token_id in eos_ids:
+                state.decoded_tokens.append(token_id)
                 break
+
+            state.decoded_tokens.append(token_id)
             if step == max_new_tokens - 1:
                 break
+
+            old_tokens = state.decoded_tokens
             state, step_ms = self.decoder.decode_one(state)
+            state.decoded_tokens = old_tokens
             metrics.decode_ms.append(step_ms)
 
         metrics.decoder_steps = len(state.decoded_tokens)
