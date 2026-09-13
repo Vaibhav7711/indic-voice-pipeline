@@ -1,0 +1,7 @@
+{
+  "model": "openai/whisper-small",
+  "checkpoint": "results/whisper-lora-hi-full/best",
+  "language": "hi",
+  "samples": 50,
+  "wer_percent": 37.66
+}

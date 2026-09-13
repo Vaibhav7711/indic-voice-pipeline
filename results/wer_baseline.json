@@ -1,0 +1,7 @@
+{
+  "model": "openai/whisper-small",
+  "checkpoint": null,
+  "language": "hi",
+  "samples": 50,
+  "wer_percent": 75.8
+}

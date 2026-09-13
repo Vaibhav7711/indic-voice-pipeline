@@ -101,6 +101,8 @@ def prepare_model(config):
         bias="none",
     )
     model = get_peft_model(model, lora_config)
+    model.generation_config.language = config.language
+    model.generation_config.task = "transcribe"
     model.print_trainable_parameters()
     return model, processor
 
@@ -130,6 +132,7 @@ class DataCollator:
         if (label_ids[:, 0] == self.processor.tokenizer.bos_token_id).all():
             label_ids = label_ids[:, 1:]
 
+        batch["input_features"] = batch["input_features"].half()
         batch["labels"] = label_ids
         return batch
 
@@ -187,7 +190,7 @@ def train(config):
         eval_dataset=eval_ds,
         data_collator=collator,
         compute_metrics=compute_metrics,
-        tokenizer=processor.feature_extractor,
+        processing_class=processor.feature_extractor,
     )
 
     print("Starting training...")
