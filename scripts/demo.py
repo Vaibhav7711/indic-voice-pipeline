@@ -11,7 +11,7 @@ def main():
         raise RuntimeError("CUDA required.")
 
     print(f"GPU: {torch.cuda.get_device_name(0)}")
-    print(f"VRAM: {torch.cuda.get_device_properties(0).total_mem / (1024**3):.1f} GiB\n")
+    print(f"VRAM: {torch.cuda.get_device_properties(0).total_memory / (1024**3):.1f} GiB\n")
 
     # Load models.
     from asr.explicit import load_whisper

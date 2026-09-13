@@ -37,7 +37,7 @@ def snapshot_vram(device: torch.device | None = None) -> VRAMSnapshot:
     return VRAMSnapshot(
         torch.cuda.memory_allocated(device),
         torch.cuda.memory_reserved(device),
-        torch.cuda.get_device_properties(device).total_mem,
+        torch.cuda.get_device_properties(device).total_memory,
     )
 
 
