@@ -27,22 +27,15 @@ def main():
     import evaluate
     from datasets import load_dataset
 
-    # Load model.
-    if args.checkpoint:
-        from transformers import WhisperForConditionalGeneration, WhisperProcessor
-        from peft import PeftModel
+    # Merge adapters before entering the explicit runtime. This keeps the
+    # benchmark path identical to actual pipeline inference.
+    from asr.explicit import load_whisper
 
-        processor = WhisperProcessor.from_pretrained(args.checkpoint)
-        base = WhisperForConditionalGeneration.from_pretrained(
-            args.model, torch_dtype=torch.float16,
-        )
-        model = PeftModel.from_pretrained(base, args.checkpoint)
-        model = model.merge_and_unload().to("cuda").eval()
+    loaded = load_whisper(args.model, adapter_path=args.checkpoint)
+    model, processor = loaded.model, loaded.processor
+    if args.checkpoint:
         print(f"Loaded fine-tuned model from {args.checkpoint}")
     else:
-        from asr.explicit import load_whisper
-        loaded = load_whisper(args.model)
-        model, processor = loaded.model, loaded.processor
         print(f"Loaded base model: {args.model}")
 
     from asr.explicit.runner import ASRRunner

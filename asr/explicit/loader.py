@@ -8,6 +8,7 @@ alongside a 0.6B LLM.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 
 import torch
 from transformers import WhisperForConditionalGeneration, WhisperProcessor
@@ -16,6 +17,7 @@ from transformers import WhisperForConditionalGeneration, WhisperProcessor
 @dataclass(frozen=True)
 class LoadedWhisper:
     model_name: str
+    adapter_path: str | None
     model: WhisperForConditionalGeneration
     processor: WhisperProcessor
     dtype: torch.dtype
@@ -25,15 +27,46 @@ class LoadedWhisper:
 def load_whisper(
     model_name: str = "openai/whisper-small",
     *,
+    adapter_path: str | Path | None = None,
     dtype: torch.dtype = torch.float16,
 ) -> LoadedWhisper:
+    """Load Whisper, optionally merging a PEFT LoRA adapter for inference.
+
+    ``adapter_path`` must contain PEFT's ``adapter_config.json`` and
+    ``adapter_model.safetensors``. The adapter is merged before the explicit
+    runner receives the model, so its encoder/decoder and KV-cache path remain
+    exactly the same as base-model inference.
+    """
     if not torch.cuda.is_available():
         raise RuntimeError("CUDA required. Use a GPU Colab runtime.")
 
+    adapter = Path(adapter_path).expanduser().resolve() if adapter_path else None
+    if adapter is not None:
+        required = (adapter / "adapter_config.json", adapter / "adapter_model.safetensors")
+        missing = [str(path) for path in required if not path.is_file()]
+        if missing:
+            raise FileNotFoundError(
+                "Invalid LoRA adapter directory; missing: " + ", ".join(missing),
+            )
+
     device = torch.device("cuda")
-    processor = WhisperProcessor.from_pretrained(model_name)
+    # A saved adapter may include a processor customized during fine-tuning.
+    processor = WhisperProcessor.from_pretrained(str(adapter or model_name))
     model = WhisperForConditionalGeneration.from_pretrained(
         model_name, torch_dtype=dtype,
-    ).to(device)
+    )
+    if adapter is not None:
+        from peft import PeftModel
+
+        model = PeftModel.from_pretrained(model, str(adapter)).merge_and_unload()
+
+    model = model.to(device)
     model.eval()
-    return LoadedWhisper(model_name, model, processor, dtype, device)
+    return LoadedWhisper(
+        model_name=model_name,
+        adapter_path=str(adapter) if adapter is not None else None,
+        model=model,
+        processor=processor,
+        dtype=dtype,
+        device=device,
+    )

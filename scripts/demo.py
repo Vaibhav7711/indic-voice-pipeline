@@ -2,11 +2,17 @@
 
 from __future__ import annotations
 
+import argparse
 import torch
 import numpy as np
 
 
 def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--whisper-model", default="openai/whisper-small")
+    parser.add_argument("--adapter", default=None, help="Path to a PEFT LoRA adapter")
+    args = parser.parse_args()
+
     if not torch.cuda.is_available():
         raise RuntimeError("CUDA required.")
 
@@ -18,8 +24,8 @@ def main():
     from llm import load_llm
     from pipeline import VoicePipeline
 
-    print("Loading Whisper-small...")
-    whisper = load_whisper("openai/whisper-small")
+    print(f"Loading {args.whisper_model}...")
+    whisper = load_whisper(args.whisper_model, adapter_path=args.adapter)
 
     print("Loading Qwen3-0.6B...")
     llm = load_llm("Qwen/Qwen3-0.6B")

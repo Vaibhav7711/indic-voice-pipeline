@@ -129,6 +129,27 @@ print(result.answer)            # LLM response
 print(result.metrics.as_dict()) # Full latency waterfall
 ```
 
+### Serve a fine-tuned LoRA adapter
+
+The explicit ASR runner can merge a PEFT LoRA adapter before inference. This
+means the production path still owns Whisper's encoder/decoder loop and KV
+cache; it does not fall back to `model.generate()`.
+
+```python
+whisper = load_whisper(
+    "openai/whisper-medium",
+    adapter_path="/content/drive/MyDrive/whisper-training/checkpoint-600",
+)
+```
+
+For the Gradio demo, set `WHISPER_ADAPTER_PATH` to the adapter directory. For
+the command-line demo:
+
+```bash
+python scripts/demo.py --whisper-model openai/whisper-medium \
+  --adapter /content/drive/MyDrive/whisper-training/checkpoint-600
+```
+
 ## Key design decisions
 
 ### Why own the Whisper loop?

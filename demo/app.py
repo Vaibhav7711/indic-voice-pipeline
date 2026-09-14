@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import numpy as np
 import gradio as gr
 
@@ -19,7 +20,12 @@ def _load():
     from pipeline import VoicePipeline
     from tts import TTSSynthesizer
 
-    w = load_whisper("openai/whisper-small")
+    # Set WHISPER_ADAPTER_PATH to serve a trained LoRA adapter. Keeping this
+    # configurable makes it impossible to accidentally demo the base model.
+    w = load_whisper(
+        os.getenv("WHISPER_MODEL", "openai/whisper-small"),
+        adapter_path=os.getenv("WHISPER_ADAPTER_PATH") or None,
+    )
     l = load_llm("Qwen/Qwen3-0.6B")
     _pipe = VoicePipeline(w, l)
     _tts = TTSSynthesizer(language="hi")
