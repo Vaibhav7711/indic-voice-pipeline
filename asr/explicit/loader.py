@@ -50,8 +50,13 @@ def load_whisper(
             )
 
     device = torch.device("cuda")
-    # A saved adapter may include a processor customized during fine-tuning.
-    processor = WhisperProcessor.from_pretrained(str(adapter or model_name))
+    # Trainer checkpoints contain the adapter and feature-extractor config but
+    # not necessarily the tokenizer files. Final exported adapters do contain
+    # them, so prefer those only when the complete processor is present.
+    processor_source = model_name
+    if adapter is not None and (adapter / "tokenizer_config.json").is_file():
+        processor_source = str(adapter)
+    processor = WhisperProcessor.from_pretrained(processor_source)
     model = WhisperForConditionalGeneration.from_pretrained(
         model_name, torch_dtype=dtype,
     )
