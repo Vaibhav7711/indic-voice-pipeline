@@ -4,7 +4,11 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
-import torch
+
+# importorskip so the module skips cleanly at collection time when torch is
+# absent. Without it, `pytest tests/` fails outright on a CPU-only machine
+# and the CPU-runnable scoring tests never get a chance to run.
+torch = pytest.importorskip("torch")
 
 pytestmark = pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA required")
 
