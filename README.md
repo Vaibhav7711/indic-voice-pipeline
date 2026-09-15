@@ -41,6 +41,18 @@ comparison, error analysis and hard-set bootstrap — open
 > falls back through `trust_remote_code` and the Hub's parquet revision, and
 > raises an actionable error if all three fail.
 
+## Streaming and voice-agent behaviour
+
+Streaming ASR (`asr/streaming/`) and agent output (`agent/`, `tts/streaming.py`)
+are documented in [`docs/STREAMING.md`](docs/STREAMING.md), including what is
+genuinely streaming versus buffered, and which latency fields are measured
+versus approximated.
+
+```bash
+python scripts/streaming_demo.py            # simulated turn, no GPU or network
+python scripts/streaming_demo.py --barge-in # interruption path
+```
+
 ## Repository structure
 
 ```text
@@ -51,8 +63,13 @@ asr/
     encoder.py        Explicit encoder forward with CUDA timing
     decoder.py        Autoregressive decoder loop with dual KV cache
     runner.py         Full ASR runner: mel → encoder → decoder
+    chunking.py       Long-form windowing and transcript stitching
+  streaming/
+    endpointer.py     Online (frame-synchronous) speech endpointing
+    session.py        Stateful streaming session with partial updates
   training/
     lora.py           LoRA fine-tuning on FLEURS/CommonVoice Hindi
+  vad.py              Offline energy VAD (the endpointer's reference)
 
 llm/
     runner.py         Explicit LLM decode runner (prefill/decode split)
@@ -64,6 +81,7 @@ pipeline/
 
 tts/
     synthesis.py      Edge-TTS wrapper (Hindi/Telugu neural voices)
+    streaming.py      Sentence splitting and incremental synthesis
 
 benchmarks/
     asr_eval.py       Evaluation harness: WER/CER, error categories, latency
@@ -95,9 +113,15 @@ tests/
     test_asr_eval.py  Harness and hard-set tests (CPU only)
     test_compare.py   Run-comparison guard tests (CPU only)
     test_checkpoints.py  Checkpoint resolution and torn-write detection
+    test_streaming.py Endpointer and streaming session (CPU only)
+    test_agent.py     Playback, barge-in, turn latency (CPU only)
 
 notebooks/
     eval_colab.ipynb  End-to-end GPU evaluation workflow for Colab
+
+agent/
+    playback.py       Playback lifecycle and thread-safe barge-in
+    turn.py           Turn orchestration with four-segment latency accounting
 
 demo/
     app.py            Gradio: record audio → transcript → answer → speech
