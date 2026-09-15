@@ -338,17 +338,24 @@ def _select_indices(total: int, limit: int | None, strategy: str, seed: int) -> 
     return sorted(rng.sample(range(total), limit))
 
 
-def _iter_fleurs(config: str, split: str, indices: list[int]):
-    from datasets import load_dataset
+def _iter_fleurs(dataset, config: str, split: str, indices: list[int]):
+    """Yield selected FLEURS rows from an already-loaded dataset.
 
-    dataset = load_dataset("google/fleurs", config, split=split)
+    Takes the dataset object rather than a name so the split is loaded exactly
+    once. Loading it twice is not a re-download thanks to the local cache, but
+    on Colab it still re-scans and re-prepares the split, which is minutes of
+    wall clock for no benefit.
+    """
+    from benchmarks.fleurs import extract_audio
+
     for index in indices:
         row = dataset[index]
+        waveform, sample_rate = extract_audio(row)
         yield {
             "id": f"fleurs-{config}-{split}-{index}",
             "reference": row["transcription"],
-            "audio_array": row["audio"]["array"],
-            "sampling_rate": row["audio"]["sampling_rate"],
+            "audio_array": waveform,
+            "sampling_rate": sample_rate,
             "categories": [],
             "audio_ref": {
                 "type": "hf",
@@ -429,13 +436,12 @@ def command_run(args: argparse.Namespace) -> int:
         examples = list(_iter_hard_set(args.hard_set, args.root))
         selection = {"source": "hard_set", "manifest": args.hard_set}
     else:
-        from datasets import load_dataset
+        from benchmarks.fleurs import load_fleurs
 
         config = f"{args.language}_in"
-        dataset = load_dataset("google/fleurs", config, split=args.split)
+        dataset = load_fleurs(config, args.split)
         indices = _select_indices(len(dataset), args.limit, args.sample, args.seed)
-        del dataset
-        examples = list(_iter_fleurs(config, args.split, indices))
+        examples = list(_iter_fleurs(dataset, config, args.split, indices))
         selection = {
             "source": "fleurs",
             "config": config,
@@ -443,15 +449,39 @@ def command_run(args: argparse.Namespace) -> int:
             "strategy": args.sample,
             "seed": args.seed,
             "limit": args.limit,
+            "available": len(dataset),
             "indices": indices,
         }
 
-    loaded = load_whisper(args.model, adapter_path=args.adapter)
+    dtype = {"float16": torch.float16, "float32": torch.float32}[args.dtype]
+    loaded = load_whisper(args.model, adapter_path=args.adapter, dtype=dtype)
     runner = ASRRunner(loaded.model, loaded.processor, loaded.device, loaded.dtype)
+
+    device_name = (
+        torch.cuda.get_device_name(0) if torch.cuda.is_available() else "cpu"
+    )
     print(
         f"Model: {args.model}"
         + (f" + adapter {args.adapter}" if args.adapter else " (base, no adapter)")
     )
+    print(f"Device: {device_name}   dtype: {args.dtype}")
+
+    # Warmup. The first GPU forward pass pays for cuDNN autotuning, kernel
+    # loading and allocator growth, and on a T4 it can be several times slower
+    # than steady state. Without this the first utterance poisons the mean RTF
+    # and, on a small run, the p90 as well. Results are discarded.
+    if examples and args.warmup > 0:
+        print(f"Warmup: {args.warmup} pass(es), discarded...")
+        warm = np.asarray(examples[0]["audio_array"], dtype=np.float32)
+        for _ in range(args.warmup):
+            runner.transcribe_array(
+                warm,
+                examples[0]["sampling_rate"],
+                language=args.language,
+                max_new_tokens=args.max_new_tokens,
+            )
+        torch.cuda.synchronize()
+
     print(f"Evaluating {len(examples)} example(s)...")
 
     rows = []
@@ -486,13 +516,12 @@ def command_run(args: argparse.Namespace) -> int:
         "adapter": args.adapter,
         "language": args.language,
         "max_new_tokens": args.max_new_tokens,
+        "dtype": args.dtype,
+        "warmup": args.warmup,
         "reporting_level": args.level,
         "selection": selection,
         "runtime": "asr.explicit.ASRRunner",
-        "cuda_device": torch.cuda.get_device_name(0)
-        if torch.cuda.is_available()
-        else None,
-        "dtype": str(loaded.dtype),
+        "cuda_device": device_name,
         "provenance": provenance(),
     }
     write_json(out_dir / "run_config.json", run_config)
@@ -620,6 +649,21 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--sample", default="random", choices=["random", "first"])
     run.add_argument("--seed", type=int, default=0)
     run.add_argument("--max-new-tokens", type=int, default=225)
+    run.add_argument(
+        "--dtype",
+        default="float16",
+        choices=["float16", "float32"],
+        help="float16 uses T4 tensor cores and is the serving default; "
+        "float32 is the reference for checking quantisation loss.",
+    )
+    run.add_argument(
+        "--warmup",
+        type=int,
+        default=2,
+        help="Discarded warmup passes before timing. The first GPU forward "
+        "pays for cuDNN autotuning and allocator growth; without warmup it "
+        "poisons mean RTF. Set 0 to measure cold-start explicitly.",
+    )
     run.add_argument("--hard-set", default=None, help="Hard set manifest path")
     run.add_argument("--root", default=".", help="Root for relative audio paths")
     run.add_argument("--out-dir", required=True)
