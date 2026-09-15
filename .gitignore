@@ -1,0 +1,24 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# Test / tooling caches
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.ipynb_checkpoints/
+
+# Evaluation outputs. Commit a run deliberately (git add -f) when it backs a
+# result recorded in docs/EXPERIMENTS.md; do not let every scratch run land.
+results/eval/
+
+# Hard-set audio. Keep clips out of git unless they are small and
+# redistributable — see data/hard_set/README.md.
+data/hard_set/audio/*
+!data/hard_set/audio/.gitkeep
+
+# OS
+.DS_Store
