@@ -209,6 +209,14 @@ for chunk in result.chunks:
 This is deliberately fixed-window chunking, not VAD: a later stage will place
 boundaries at actual speech/silence transitions and support streaming partials.
 
+### Speech endpointing (VAD baseline)
+
+`asr.vad.detect_speech()` now provides a dependency-free energy VAD. It exposes
+its actual controls—RMS dBFS threshold, minimum speech, endpoint silence, and
+padding—so its segment decisions can be logged and compared with a neural VAD.
+This is the segmentation layer that will feed long-form ASR rather than sending
+silence and arbitrary cut points to Whisper.
+
 ## Key design decisions
 
 ### Why own the Whisper loop?
