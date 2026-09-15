@@ -31,6 +31,16 @@ Choose **Runtime → Change runtime type → T4 GPU**, then run:
 !python scripts/preflight.py
 ```
 
+For the full evaluation workflow — base vs adapter on identical audio, guarded
+comparison, error analysis and hard-set bootstrap — open
+[`notebooks/eval_colab.ipynb`](notebooks/eval_colab.ipynb) in Colab.
+
+> `scripts/setup.sh` pins `datasets<4` deliberately. `google/fleurs` is still a
+> script-backed dataset and `datasets>=4.0` removed loading-script support, so
+> an unpinned install fails on every FLEURS load. `benchmarks/fleurs.py` also
+> falls back through `trust_remote_code` and the Hub's parquet revision, and
+> raises an actionable error if all three fail.
+
 ## Repository structure
 
 ```text
@@ -60,6 +70,8 @@ benchmarks/
     metrics.py        Levenshtein alignment, WER/CER, corpus aggregation
     error_analysis.py Error categorization and per-example diagnostics
     hard_set.py       Hard-set manifest schema, validator, bootstrap
+    compare.py        Guarded run-vs-run comparison
+    fleurs.py         FLEURS loading compatibility across datasets versions
     asr_latency.py    Per-stage ASR timing with multi-run statistics
     asr_wer.py        Legacy single-number WER script (superseded by asr_eval)
     pipeline_e2e.py   Full waterfall benchmark
@@ -80,6 +92,10 @@ tests/
     test_metrics.py   Metric correctness vs independent implementation
     test_error_analysis.py  Error categorization (CPU only)
     test_asr_eval.py  Harness and hard-set tests (CPU only)
+    test_compare.py   Run-comparison guard tests (CPU only)
+
+notebooks/
+    eval_colab.ipynb  End-to-end GPU evaluation workflow for Colab
 
 demo/
     app.py            Gradio: record audio → transcript → answer → speech
