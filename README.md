@@ -56,15 +56,30 @@ tts/
     synthesis.py      Edge-TTS wrapper (Hindi/Telugu neural voices)
 
 benchmarks/
+    asr_eval.py       Evaluation harness: WER/CER, error categories, latency
+    metrics.py        Levenshtein alignment, WER/CER, corpus aggregation
+    error_analysis.py Error categorization and per-example diagnostics
+    hard_set.py       Hard-set manifest schema, validator, bootstrap
     asr_latency.py    Per-stage ASR timing with multi-run statistics
-    asr_wer.py        WER evaluation on Indic test sets
+    asr_wer.py        Legacy single-number WER script (superseded by asr_eval)
     pipeline_e2e.py   Full waterfall benchmark
     memory_profile.py VRAM timeline across pipeline stages
+
+text/
+    normalize.py      Hindi/Hinglish normalization ladder
+    lexicon.py        Number-word lexicon for error categorization
+
+data/
+    hard_set/         Curated adversarial evaluation set + curation protocol
 
 tests/
     test_asr.py       Explicit loop vs model.generate() token match
     test_pipeline.py  Integration tests and memory bounds
     test_llm.py       LLM runner correctness
+    test_normalize.py Normalization behaviour (CPU only)
+    test_metrics.py   Metric correctness vs independent implementation
+    test_error_analysis.py  Error categorization (CPU only)
+    test_asr_eval.py  Harness and hard-set tests (CPU only)
 
 demo/
     app.py            Gradio: record audio → transcript → answer → speech
@@ -186,9 +201,36 @@ auto-detects and switches to sequential mode: offload Whisper to CPU after
 transcription, load LLM, pay the swap cost. The strategy is chosen by
 measurement at construction time.
 
+## Evaluation
+
+```bash
+# Final test number (GPU). Seeded random sample, never a prefix slice.
+python -m benchmarks.asr_eval run \
+    --model openai/whisper-medium \
+    --adapter results/whisper-lora-hi-full/best \
+    --split test --limit 300 --seed 0 \
+    --out-dir results/eval/medium-lora-test
+
+# Re-score saved predictions with different settings (no GPU, milliseconds).
+python -m benchmarks.asr_eval score \
+    --predictions results/eval/medium-lora-test/predictions.jsonl \
+    --level aggressive --out-dir results/eval/medium-lora-test-aggressive
+```
+
+Each run writes `run_config.json` (git SHA, versions, the exact sampled
+indices), `predictions.jsonl`, `metrics.json` and `errors.jsonl`. WER is
+reported with CER, at three normalization levels simultaneously, and broken
+down by error category — so normalization can never be used to quietly improve
+a number. See `docs/EXPERIMENTS.md` for the full protocol.
+
+The scoring layer has no torch/transformers dependency: `pytest tests/` runs on
+CPU, and saved predictions can be re-scored anywhere.
+
 ## Measured Colab T4 results
 
-_To be filled after running benchmarks._
+_To be filled after running benchmarks. The numbers below predate
+`benchmarks/asr_eval.py` and are not comparable to it — different base model,
+biased 50-example prefix sample, no normalization policy, no CER._
 
 ### ASR baseline (Whisper-small, no fine-tuning)
 
