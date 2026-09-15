@@ -454,7 +454,29 @@ def command_run(args: argparse.Namespace) -> int:
         }
 
     dtype = {"float16": torch.float16, "float32": torch.float32}[args.dtype]
-    loaded = load_whisper(args.model, adapter_path=args.adapter, dtype=dtype)
+
+    # Resolve the adapter by policy where asked, then verify it before the
+    # model loads. A hardcoded checkpoint number goes stale the moment
+    # save_total_limit rotates it away, and an adapter read while the Trainer
+    # is mid-save surfaces as a confusing deserialisation error deep inside
+    # safetensors. Both fail here instead, with an actionable message.
+    adapter = args.adapter
+    if args.adapter_dir:
+        from benchmarks.checkpoints import resolve_adapter
+
+        adapter = str(resolve_adapter(args.adapter_dir, args.adapter_policy))
+        print(f"Resolved adapter ({args.adapter_policy}): {adapter}")
+
+    adapter_info = None
+    if adapter:
+        from benchmarks.checkpoints import stage_checkpoint, verify_adapter
+
+        if args.stage_adapter:
+            adapter = str(stage_checkpoint(adapter, args.stage_adapter))
+            print(f"Staged adapter to local disk: {adapter}")
+        adapter_info = verify_adapter(adapter)
+
+    loaded = load_whisper(args.model, adapter_path=adapter, dtype=dtype)
     runner = ASRRunner(loaded.model, loaded.processor, loaded.device, loaded.dtype)
 
     device_name = (
@@ -462,7 +484,7 @@ def command_run(args: argparse.Namespace) -> int:
     )
     print(
         f"Model: {args.model}"
-        + (f" + adapter {args.adapter}" if args.adapter else " (base, no adapter)")
+        + (f" + adapter {adapter}" if adapter else " (base, no adapter)")
     )
     print(f"Device: {device_name}   dtype: {args.dtype}")
 
@@ -513,7 +535,9 @@ def command_run(args: argparse.Namespace) -> int:
 
     run_config = {
         "model": args.model,
-        "adapter": args.adapter,
+        "adapter": adapter,
+        "adapter_info": adapter_info,
+        "note": args.note,
         "language": args.language,
         "max_new_tokens": args.max_new_tokens,
         "dtype": args.dtype,
@@ -638,6 +662,34 @@ def build_parser() -> argparse.ArgumentParser:
     run = sub.add_parser("run", help="transcribe and score (needs GPU)")
     run.add_argument("--model", default="openai/whisper-medium")
     run.add_argument("--adapter", default=None, help="PEFT LoRA adapter directory")
+    run.add_argument(
+        "--adapter-dir",
+        default=None,
+        help="Trainer output directory; resolves a checkpoint by policy "
+        "instead of a hardcoded step number, which goes stale as "
+        "save_total_limit rotates checkpoints away.",
+    )
+    run.add_argument(
+        "--adapter-policy",
+        default="latest",
+        choices=["latest", "best", "final"],
+        help="With --adapter-dir: newest checkpoint, the Trainer's recorded "
+        "best, or the exported best/ directory. Default: latest.",
+    )
+    run.add_argument(
+        "--stage-adapter",
+        default=None,
+        metavar="DIR",
+        help="Copy the adapter here (e.g. /content/adapters) before loading. "
+        "Avoids repeated slow reads over the Drive mount and avoids adding "
+        "read load to a mount a training job is writing to.",
+    )
+    run.add_argument(
+        "--note",
+        default="",
+        help="Free-text note recorded in run_config.json. Use it for caveats, "
+        "e.g. 'GPU shared with a training run - latency invalid'.",
+    )
     run.add_argument("--language", default="hi")
     run.add_argument(
         "--split",
