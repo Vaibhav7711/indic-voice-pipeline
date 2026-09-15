@@ -197,6 +197,12 @@ Hindi audio (16 kHz WAV, up to 30s)
      │   Chains [1]→[2]→[3], adds timing aggregation
      │   Detokenizes: token IDs → Hindi text
      │   Output: ASRResult(text, token_ids, metrics)
+     │
+     ├── ASRRunner.transcribe_long_file()/transcribe_long_array()
+     │   Splits arbitrary-length audio into 25 s windows with 5 s overlap
+     │   (all windows remain within Whisper's 30 s encoder limit)
+     │   Merges only a verified token suffix/prefix at each boundary
+     │   Output: LongFormASRResult(text, chunks, per-chunk metrics)
      ▼
 [5] orchestrator.py — VoicePipeline._build_prompt()
      │   CPU: Applies Qwen chat template with Indic system prompt

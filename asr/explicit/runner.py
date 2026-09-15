@@ -15,6 +15,7 @@ from transformers import WhisperForConditionalGeneration, WhisperProcessor
 
 from asr.explicit.decoder import WhisperDecoder
 from asr.explicit.encoder import WhisperEncoder
+from asr.explicit.chunking import AudioChunk, chunk_audio, merge_overlapping_transcripts
 from asr.explicit.mel import extract_mel, load_audio, load_audio_from_array
 
 
@@ -64,6 +65,32 @@ class ASRResult:
     token_ids: list[int]
     language: str | None
     metrics: ASRMetrics
+
+
+@dataclass
+class LongFormMetrics:
+    """Aggregate timing and chunk geometry for a long-form transcription."""
+
+    audio_duration_seconds: float
+    chunk_count: int
+    audio_load_ms: float
+    chunk_asr_ms: float
+    total_ms: float
+
+    @property
+    def real_time_factor(self) -> float:
+        if self.audio_duration_seconds <= 0:
+            return 0.0
+        return (self.total_ms / 1000.0) / self.audio_duration_seconds
+
+
+@dataclass
+class LongFormASRResult:
+    text: str
+    language: str | None
+    chunks: list[AudioChunk]
+    chunk_results: list[ASRResult]
+    metrics: LongFormMetrics
 
 
 class ASRRunner:
@@ -124,6 +151,79 @@ class ASRRunner:
 
         return self._transcribe(waveform, duration, load_ms, language,
                                 max_new_tokens, total_start)
+
+    def transcribe_long_file(
+        self,
+        path: str,
+        *,
+        language: str | None = None,
+        chunk_seconds: float = 25.0,
+        overlap_seconds: float = 5.0,
+        max_new_tokens: int = 225,
+    ) -> LongFormASRResult:
+        """Transcribe arbitrary-length file audio through bounded Whisper windows."""
+        load_start = perf_counter_ns()
+        waveform, _ = load_audio(path)
+        load_ms = (perf_counter_ns() - load_start) / 1_000_000
+        return self._transcribe_long_normalized(
+            waveform, load_ms, language, chunk_seconds, overlap_seconds, max_new_tokens,
+        )
+
+    def transcribe_long_array(
+        self,
+        waveform: np.ndarray,
+        sample_rate: int,
+        *,
+        language: str | None = None,
+        chunk_seconds: float = 25.0,
+        overlap_seconds: float = 5.0,
+        max_new_tokens: int = 225,
+    ) -> LongFormASRResult:
+        """Transcribe arbitrary-length in-memory audio with overlap-aware merging."""
+        load_start = perf_counter_ns()
+        waveform, _ = load_audio_from_array(waveform, sample_rate)
+        load_ms = (perf_counter_ns() - load_start) / 1_000_000
+        return self._transcribe_long_normalized(
+            waveform, load_ms, language, chunk_seconds, overlap_seconds, max_new_tokens,
+        )
+
+    def _transcribe_long_normalized(
+        self,
+        waveform: np.ndarray,
+        load_ms: float,
+        language: str | None,
+        chunk_seconds: float,
+        overlap_seconds: float,
+        max_new_tokens: int,
+    ) -> LongFormASRResult:
+        total_start = perf_counter_ns()
+        windows = chunk_audio(
+            waveform, 16_000, chunk_seconds=chunk_seconds, overlap_seconds=overlap_seconds,
+        )
+        results: list[ASRResult] = []
+        text = ""
+        for spec, chunk in windows:
+            # The waveform is already normalized to 16 kHz, so this call adds no resampling.
+            result = self.transcribe_array(
+                chunk, 16_000, language=language, max_new_tokens=max_new_tokens,
+            )
+            results.append(result)
+            text = merge_overlapping_transcripts(text, result.text)
+
+        total_ms = (perf_counter_ns() - total_start) / 1_000_000 + load_ms
+        return LongFormASRResult(
+            text=text,
+            language=language,
+            chunks=[spec for spec, _ in windows],
+            chunk_results=results,
+            metrics=LongFormMetrics(
+                audio_duration_seconds=len(waveform) / 16_000,
+                chunk_count=len(windows),
+                audio_load_ms=load_ms,
+                chunk_asr_ms=sum(result.metrics.total_ms for result in results),
+                total_ms=total_ms,
+            ),
+        )
 
     def _transcribe(
         self,

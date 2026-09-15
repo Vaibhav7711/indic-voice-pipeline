@@ -183,6 +183,32 @@ python scripts/demo.py --whisper-model openai/whisper-medium \
   --adapter /content/drive/MyDrive/whisper-training/checkpoint-600
 ```
 
+### Transcribe recordings longer than 30 seconds
+
+Whisper's encoder is a fixed 30-second window. `transcribe_long_file` uses
+25-second windows with a 5-second overlap, then removes only verified repeated
+tokens at each boundary. It returns both the merged transcript and per-window
+timing/locations so the behaviour can be measured and debugged.
+
+```python
+from asr.explicit import ASRRunner, load_whisper
+
+loaded = load_whisper(
+    "openai/whisper-medium",
+    adapter_path="Hugme6969/whisper-medium-hindi-lora",
+)
+runner = ASRRunner(loaded.model, loaded.processor, loaded.device, loaded.dtype)
+result = runner.transcribe_long_file("meeting.wav", language="hi")
+
+print(result.text)
+print(result.metrics.chunk_count, result.metrics.real_time_factor)
+for chunk in result.chunks:
+    print(chunk.index, chunk.start_seconds, chunk.end_seconds)
+```
+
+This is deliberately fixed-window chunking, not VAD: a later stage will place
+boundaries at actual speech/silence transitions and support streaming partials.
+
 ## Key design decisions
 
 ### Why own the Whisper loop?

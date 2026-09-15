@@ -5,6 +5,9 @@ Owns the full loop: mel → encoder → autoregressive decoder with dual KV cach
 """
 
 from asr.explicit.loader import LoadedWhisper, load_whisper
-from asr.explicit.runner import ASRMetrics, ASRResult, ASRRunner
+from asr.explicit.runner import ASRMetrics, ASRResult, ASRRunner, LongFormASRResult, LongFormMetrics
 
-__all__ = ["LoadedWhisper", "load_whisper", "ASRRunner", "ASRResult", "ASRMetrics"]
+__all__ = [
+    "LoadedWhisper", "load_whisper", "ASRRunner", "ASRResult", "ASRMetrics",
+    "LongFormASRResult", "LongFormMetrics",
+]
