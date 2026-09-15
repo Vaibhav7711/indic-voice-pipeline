@@ -72,6 +72,7 @@ benchmarks/
     hard_set.py       Hard-set manifest schema, validator, bootstrap
     compare.py        Guarded run-vs-run comparison
     fleurs.py         FLEURS loading compatibility across datasets versions
+    checkpoints.py    Checkpoint discovery, integrity checks, local staging
     asr_latency.py    Per-stage ASR timing with multi-run statistics
     asr_wer.py        Legacy single-number WER script (superseded by asr_eval)
     pipeline_e2e.py   Full waterfall benchmark
@@ -93,6 +94,7 @@ tests/
     test_error_analysis.py  Error categorization (CPU only)
     test_asr_eval.py  Harness and hard-set tests (CPU only)
     test_compare.py   Run-comparison guard tests (CPU only)
+    test_checkpoints.py  Checkpoint resolution and torn-write detection
 
 notebooks/
     eval_colab.ipynb  End-to-end GPU evaluation workflow for Colab

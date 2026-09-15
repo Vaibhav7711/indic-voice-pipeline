@@ -137,23 +137,55 @@ Do not cite them alongside new numbers.
 | Effective batch size | 8 (2 × 4 gradient accumulation) |
 | Target | 3 epochs / 2,670 optimizer steps |
 | Checkpoint policy | every 200 steps; retain latest 3 in Drive |
-| Latest saved checkpoint | Drive `whisper-training/checkpoint-1400` |
-| Status | **interrupted** at step 1400 (GPU availability); resumable |
+| Checkpoint location | Drive `whisper-training/` (read-only to this repo) |
+| Status | **running**, past step 2000 of a 2,670-step target |
 
 ### Validation history
 
 | Step | FLEURS Hindi validation WER | Note |
 | --- | --- | --- |
 | 600 | 32.70% | |
-| 1400 | 28.00% | latest saved checkpoint; training interrupted here |
+| 1400 | 28.00% | run interrupted here (GPU availability), later resumed |
+| 2000 | _to record_ | training resumed and still in progress |
 
-Still improving at the point of interruption, so step 1400 is not a converged
-result and must not be reported as a final number. These are *validation*
-figures used for model selection only — no test-set number exists for this run
-until `asr_eval.py` is run against the untouched test split.
+Still improving where last measured, so no checkpoint from this run is a
+converged result and none may be reported as a final number. These are
+*validation* figures used for model selection only — no test-set number exists
+for this run yet.
 
-Drive checkpoints are treated as read-only: nothing in this repo writes to,
-deletes, or assumes access to `whisper-training/`.
+**Do not evaluate on `test` until training finishes.** Each look at the test
+split erodes its independence, and the model is not converged.
+
+**Never hardcode a checkpoint step.** With `save_total_limit=3`, only the most
+recent checkpoints survive; `load_best_model_at_end=True` additionally protects
+whichever checkpoint is best by validation WER. So the set on disk changes as
+training advances and `checkpoint-1400` may already be gone. Resolve by policy:
+
+```bash
+python -m benchmarks.asr_eval run \
+    --model openai/whisper-medium \
+    --adapter-dir /content/drive/MyDrive/whisper-training \
+    --adapter-policy best \
+    --stage-adapter /content/adapters \
+    --split validation --limit 300 --seed 0 \
+    --out-dir results/eval/medium-best-validation
+```
+
+`--stage-adapter` copies the adapter off the Drive mount and verifies the
+safetensors header against the real file size, which catches a checkpoint read
+while the Trainer is mid-save instead of failing later inside safetensors.
+
+Drive checkpoints are read-only: nothing in this repo writes to, deletes, or
+assumes access to `whisper-training/`.
+
+### Measuring latency while training runs
+
+Don't. RTF, p50 and p90 measured on a GPU that is simultaneously training
+describe contention, not the serving path, and `--warmup` does not help — it
+removes cold-start cost, not a competing process. Either use a separate
+runtime, or record WER/CER only and pass
+`--note "GPU shared with training run - latency invalid"` so the caveat lands
+in `run_config.json` rather than being forgotten.
 
 ### Required comparisons after training
 
