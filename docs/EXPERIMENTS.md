@@ -138,23 +138,59 @@ Do not cite them alongside new numbers.
 | Target | 3 epochs / 2,670 optimizer steps |
 | Checkpoint policy | every 200 steps; retain latest 3 in Drive |
 | Checkpoint location | Drive `whisper-training/` (read-only to this repo) |
-| Status | **running**, past step 2000 of a 2,670-step target |
+| Final adapter | [`Hugme6969/whisper-medium-hindi-lora`](https://huggingface.co/Hugme6969/whisper-medium-hindi-lora) |
+| Status | **completed**: 3 epochs / 2,670 optimizer steps |
 
 ### Validation history
 
 | Step | FLEURS Hindi validation WER | Note |
 | --- | --- | --- |
 | 600 | 32.70% | |
-| 1400 | 28.00% | run interrupted here (GPU availability), later resumed |
-| 2000 | _to record_ | training resumed and still in progress |
+| 1400 | 28.00% | interrupted for GPU availability; later resumed |
+| 2000 | 26.23% | resumed checkpoint |
+| 2670 / epoch 3 | **25.7437%** | final validation WER; eval loss 0.23547 |
 
-Still improving where last measured, so no checkpoint from this run is a
-converged result and none may be reported as a final number. These are
-*validation* figures used for model selection only — no test-set number exists
-for this run yet.
+These are *validation* figures used for model selection. The final test result
+below is kept separate and was not used to choose a checkpoint.
 
-**Do not evaluate on `test` until training finishes.** Each look at the test
-split erodes its independence, and the model is not converged.
+### Final v1 held-out evaluation
+
+The frozen v1 adapter and the base model were evaluated through the explicit
+`ASRRunner` on the same seeded random **300-example** subset of the 418-example
+FLEURS Hindi test split (`seed=0`, standard normalization, Tesla T4). Complete
+machine-readable evidence is committed under `results/eval/`; the matching
+`run_config.json` files contain the literal selected indices, package versions,
+GPU, CLI arguments and git provenance.
+
+| Model | WER | CER | WER change | Mean RTF |
+| --- | ---: | ---: | ---: | ---: |
+| `openai/whisper-medium` base | 40.4270% | 16.7354% | — | 0.2298 |
+| Hindi LoRA v1 | **25.8246%** | **9.6055%** | **−14.6024 pp** (36.12% relative reduction) | 0.2382 |
+
+The adapter improves WER and CER substantially with a small serving cost:
+p50 latency rises from 2460.554 ms to 2539.962 ms (+79.408 ms), and p90 from
+3729.869 ms to 3850.711 ms (+120.842 ms). This is an evaluation of the fixed
+300-example subset, not a claim about all Hindi speech or a benchmark tuned on
+the test split.
+
+| Normalization sensitivity | Base WER | LoRA WER |
+| --- | ---: | ---: |
+| raw | 43.0582% | 26.6216% |
+| standard (reported) | 40.4270% | 25.8246% |
+| orthography-blind diagnostic | 39.0858% | 24.2644% |
+
+For the LoRA run, the largest remaining categories are `other` (1,061 errors,
+56.23%), `rare_word` (377, 19.98%), and `function_word` (185, 9.80%). It has no
+truncation, repetition-loop, or hallucination-run flags on this sample; the
+base run had 27 truncation and 16 hallucination errors, plus one repetition and
+one truncation flag. These observations motivate later data/decoding work, not
+training on the held-out test examples.
+
+Evidence paths:
+
+- `results/eval/medium-base-test-300-seed0/`
+- `results/eval/medium-lora-test-300-seed0/`
+- `results/eval/compare-medium-base-vs-lora.json`
 
 **Never hardcode a checkpoint step.** With `save_total_limit=3`, only the most
 recent checkpoints survive; `load_best_model_at_end=True` additionally protects

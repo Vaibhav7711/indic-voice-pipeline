@@ -1,0 +1,95 @@
+{
+  "baseline": {
+    "dir": "results/eval/medium-base-test-300-seed0",
+    "model": "openai/whisper-medium",
+    "adapter": null
+  },
+  "candidate": {
+    "dir": "results/eval/medium-lora-test-300-seed0",
+    "model": "openai/whisper-medium",
+    "adapter": "/kaggle/working/whisper-medium-hindi-lora"
+  },
+  "comparable": true,
+  "selection_warnings": [],
+  "examples": {
+    "baseline": 300,
+    "candidate": 300
+  },
+  "wer": {
+    "before": 40.427,
+    "after": 25.8246,
+    "points": -14.6024,
+    "relative_percent": 36.12
+  },
+  "cer": {
+    "before": 16.7354,
+    "after": 9.6055,
+    "points": -7.1299,
+    "relative_percent": 42.6
+  },
+  "latency_p50_ms": {
+    "before": 2460.554,
+    "after": 2539.962,
+    "points": 79.408,
+    "relative_percent": -3.23
+  },
+  "latency_p90_ms": {
+    "before": 3729.869,
+    "after": 3850.711,
+    "points": 120.842,
+    "relative_percent": -3.24
+  },
+  "real_time_factor": {
+    "before": 0.2298,
+    "after": 0.2382,
+    "points": 0.0084,
+    "relative_percent": -3.66
+  },
+  "errors_by_category": {
+    "code_switch": {
+      "errors_before": 31,
+      "errors_after": 14,
+      "change": -17
+    },
+    "deletion_run": {
+      "errors_before": 133,
+      "errors_after": 90,
+      "change": -43
+    },
+    "function_word": {
+      "errors_before": 308,
+      "errors_after": 185,
+      "change": -123
+    },
+    "hallucination": {
+      "errors_before": 16,
+      "errors_after": 0,
+      "change": -16
+    },
+    "numeric": {
+      "errors_before": 54,
+      "errors_after": 48,
+      "change": -6
+    },
+    "orthographic": {
+      "errors_before": 96,
+      "errors_after": 112,
+      "change": 16
+    },
+    "other": {
+      "errors_before": 1753,
+      "errors_after": 1061,
+      "change": -692
+    },
+    "rare_word": {
+      "errors_before": 536,
+      "errors_after": 377,
+      "change": -159
+    },
+    "truncation": {
+      "errors_before": 27,
+      "errors_after": 0,
+      "change": -27
+    }
+  }
+}
