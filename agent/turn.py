@@ -182,6 +182,7 @@ class VoiceTurn:
         *,
         sink_factory=None,
         system_prompt: str | None = None,
+        response_language: str = "hi",
         split_into_sentences: bool = True,
         llm_max_tokens: int = 128,
         clock=None,
@@ -190,6 +191,7 @@ class VoiceTurn:
         self.synthesizer = synthesizer
         self.sink_factory = sink_factory or BufferSink
         self.system_prompt = system_prompt
+        self.response_language = response_language
         self.split_into_sentences = split_into_sentences
         self.llm_max_tokens = llm_max_tokens
         self._clock = clock or (lambda: perf_counter_ns() / 1_000_000)
@@ -201,8 +203,9 @@ class VoiceTurn:
 
     def build_prompt(self, transcript: str) -> str:
         system = self.system_prompt or (
-            "You are a helpful voice assistant. Reply briefly — this will be "
-            "spoken aloud."
+            f"You are a helpful voice assistant. Reply entirely in natural "
+            f"{self.response_language} and keep the answer brief — this will "
+            "be spoken aloud."
         )
         return f"System: {system}\n\nUser: {transcript}\n\nAssistant:"
 

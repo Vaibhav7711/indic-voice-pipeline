@@ -25,8 +25,9 @@ from pipeline.memory import (
 SYSTEM_PROMPTS = {
     "hi": (
         "You are a helpful voice assistant. The user spoke in Hindi "
-        "(possibly code-switched with English). Respond concisely in "
-        "the same language mix. Keep answers brief — this will be spoken aloud."
+        "(possibly code-switched with English). Respond entirely in natural "
+        "Hindi; keep unavoidable proper nouns and technical terms as-is. "
+        "Keep answers brief — this will be spoken aloud."
     ),
     "te": (
         "You are a helpful voice assistant. The user spoke in Telugu "
