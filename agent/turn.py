@@ -207,6 +207,26 @@ class VoiceTurn:
             f"{self.response_language} and keep the answer brief — this will "
             "be spoken aloud."
         )
+        tokenizer = getattr(self.generator, "tokenizer", None)
+        if tokenizer is not None and hasattr(tokenizer, "apply_chat_template"):
+            messages = [
+                {"role": "system", "content": system},
+                {"role": "user", "content": transcript},
+            ]
+            try:
+                return tokenizer.apply_chat_template(
+                    messages,
+                    tokenize=False,
+                    add_generation_prompt=True,
+                    enable_thinking=False,
+                )
+            except (TypeError, ValueError):
+                try:
+                    return tokenizer.apply_chat_template(
+                        messages, tokenize=False, add_generation_prompt=True,
+                    )
+                except (TypeError, ValueError):
+                    pass
         return f"System: {system}\n\nUser: {transcript}\n\nAssistant:"
 
     # -- barge-in ---------------------------------------------------------

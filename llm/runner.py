@@ -100,6 +100,9 @@ class LLMRunner:
             generated.append(token_id)
             if token_id in self.eos_ids:
                 break
+            if len(generated) >= 8 and generated[-4:] == generated[-8:-4]:
+                generated = generated[:-4]
+                break
 
             attention_mask = torch.cat([
                 attention_mask,
