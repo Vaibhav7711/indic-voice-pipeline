@@ -29,6 +29,8 @@ def _load():
     )
     llm = load_llm(os.getenv("LLM_MODEL", "Qwen/Qwen3-0.6B"))
     _pipe = VoicePipeline(w, llm)
+    # "auto" chooses among the dropdown's languages only; see decoder.detect_language.
+    _pipe.asr_runner.language_candidates = ["hi", "en", "te"]
     _tts = TTSSynthesizer(language="hi")
     return _pipe, _tts
 

@@ -451,3 +451,76 @@ class TestVoiceTurn:
         VoiceTurn(llm, FakeTTS(), system_prompt="Be brief.").run("मेरा नाम क्या है")
         assert "मेरा नाम क्या है" in llm.calls[0]
         assert "Be brief." in llm.calls[0]
+
+
+# ---------------------------------------------------------------------------
+# Synthesis is lazy: playback drives it, and barge-in stops it
+# ---------------------------------------------------------------------------
+
+
+class _CountingTTS:
+    """Records which sentences were actually sent to the backend."""
+
+    streaming = True
+
+    def __init__(self):
+        self.requested: list[str] = []
+
+    def stream(self, text):
+        self.requested.append(text)
+        for _ in range(3):
+            yield b"\x00" * 64
+
+
+class _OneShotLLM:
+    def generate(self, prompt, **kw):
+        from types import SimpleNamespace
+
+        return SimpleNamespace(
+            text="पहला वाक्य यहाँ है। दूसरा वाक्य यहाँ है। तीसरा वाक्य यहाँ है।",
+            metrics=SimpleNamespace(prefill_ms=1.0),
+        )
+
+
+class TestLazySynthesis:
+    def test_first_chunk_reaches_sink_before_second_sentence_is_synthesised(self):
+        from agent import BufferSink, VoiceTurn
+
+        tts = _CountingTTS()
+        sink = BufferSink()
+        seen_at_first_write: list[int] = []
+        original = sink.write
+
+        def write(chunk):
+            if not seen_at_first_write:
+                seen_at_first_write.append(len(tts.requested))
+            original(chunk)
+
+        sink.write = write
+        result = VoiceTurn(_OneShotLLM(), tts).run("नमस्ते", sink=sink)
+
+        assert result.state.value == "completed"
+        assert seen_at_first_write == [1], "playback started only after all sentences synthesised"
+        assert len(tts.requested) == 3
+        assert result.speech is not None and len(result.speech.chunks) == 9
+
+    def test_barge_in_during_first_sentence_stops_further_synthesis(self):
+        from agent import BufferSink, VoiceTurn
+
+        tts = _CountingTTS()
+        sink = BufferSink()
+        turn = VoiceTurn(_OneShotLLM(), tts)
+        original = sink.write
+
+        def write(chunk):
+            original(chunk)
+            turn.interrupt("test")
+
+        sink.write = write
+        result = turn.run("नमस्ते", sink=sink)
+
+        assert result.state.value == "interrupted"
+        assert tts.requested == ["पहला वाक्य यहाँ है।"], "later sentences must not be synthesised"
+        assert result.speech is not None
+        assert len(result.speech.chunks) == 1
+        assert result.speech.total_ms >= 0

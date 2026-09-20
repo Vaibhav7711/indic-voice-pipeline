@@ -109,11 +109,16 @@ class ASRRunner:
         processor: WhisperProcessor,
         device: torch.device,
         dtype: torch.dtype = torch.float16,
+        *,
+        language_candidates: list[str] | None = None,
     ):
         self.model = model
         self.processor = processor
         self.device = device
         self.dtype = dtype
+        #: When ``language=None``, detection chooses among these codes only.
+        #: None means every language Whisper knows.
+        self.language_candidates = language_candidates
         self.encoder = WhisperEncoder(model, device)
         self.decoder = WhisperDecoder(model, device)
         self.eos_token_id = model.generation_config.eos_token_id
@@ -254,7 +259,9 @@ class ASRRunner:
         # 3. Language: detect from one decoder step when not given, so the
         #    prompt is always the well-formed <|sot|><|lang|><|task|> sequence.
         if language is None:
-            language, prob, detect_ms = self.decoder.detect_language(enc.encoder_outputs)
+            language, prob, detect_ms = self.decoder.detect_language(
+                enc.encoder_outputs, candidates=self.language_candidates,
+            )
             metrics.language_detection_ms = detect_ms
             metrics.language_probability = prob
 

@@ -55,7 +55,7 @@ from typing import Any, Protocol
 
 from agent.playback import AudioSink, BufferSink, PlaybackResult, PlaybackSession
 from llm.prompting import build_chat_prompt
-from tts.streaming import SpeechStream, split_sentences, synthesize_stream
+from tts.streaming import SpeechStream, iter_synthesis
 
 __all__ = [
     "TurnState",
@@ -298,25 +298,21 @@ class VoiceTurn:
         )
         self.playback = playback
 
-        # Synthesis is driven lazily by playback, so a barge-in during the
+        # Synthesis is driven lazily by playback: iter_synthesis yields each
+        # chunk as the backend produces it, so the first sentence plays while
+        # later ones are still being synthesised, and a barge-in during the
         # first sentence stops the remaining sentences from being synthesised
         # at all rather than being generated and thrown away.
-        chunks: list[bytes] = []
-        speech = SpeechStream(
-            sentences=split_sentences(response) if self.split_into_sentences else [response],
-            streaming=metrics.tts_streaming,
-        )
+        speech = SpeechStream()
 
         def produce():
-            nonlocal speech
-            speech = synthesize_stream(
+            for chunk in iter_synthesis(
                 self.synthesizer,
                 response,
+                speech,
                 split=self.split_into_sentences,
                 should_stop=playback.should_stop,
-            )
-            for chunk in speech.chunks:
-                chunks.append(chunk.data)
+            ):
                 yield chunk.data
 
         playback_start = self._clock()

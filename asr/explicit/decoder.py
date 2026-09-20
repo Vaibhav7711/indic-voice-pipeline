@@ -90,17 +90,53 @@ class WhisperDecoder:
 
         return ids
 
+    def strip_generate_output(self, ids: list[int]) -> list[int]:
+        """Reduce a ``model.generate()`` sequence to the tokens the explicit
+        loop would have produced, for like-for-like comparison.
+
+        transformers < 5 returns the decoder prompt
+        (``<|sot|><|lang|><|task|><|notimestamps|>``) at the front; 5.x
+        strips it. Both shapes are handled by looking at the first token, and
+        a trailing EOS is dropped so the comparison is over content only.
+        """
+        out = list(ids)
+        if out and out[0] == self.gen_config.decoder_start_token_id:
+            no_ts = getattr(self.gen_config, "no_timestamps_token_id", None)
+            if no_ts in out:
+                out = out[out.index(no_ts) + 1:]
+            else:
+                out = out[4:]
+        eos = self.gen_config.eos_token_id
+        eos_ids = {eos} if isinstance(eos, int) else set(eos or [])
+        while out and out[-1] in eos_ids:
+            out.pop()
+        return out
+
     @torch.inference_mode()
     def detect_language(
-        self, encoder_outputs: BaseModelOutput,
+        self,
+        encoder_outputs: BaseModelOutput,
+        *,
+        candidates: list[str] | None = None,
     ) -> tuple[str, float, float]:
         """Predict the spoken language from a single decoder step.
 
         Runs the decoder on ``<|startoftranscript|>`` alone and takes the
         argmax over language tokens only — the same procedure Whisper's
         reference implementation uses. Returns ``(code, probability, ms)``.
+
+        ``candidates`` restricts the choice to a set of language codes. Use
+        it when the deployment only serves a few languages: a fine-tuned
+        adapter whose training labels lacked the language token (the v1
+        Hindi adapter is one) skews this position's distribution, and
+        restricting candidates is what keeps detection usable on it.
         """
         table = self._language_token_ids()
+        if candidates:
+            unknown = [c for c in candidates if c not in table]
+            if unknown:
+                raise ValueError(f"unknown Whisper language codes {unknown!r}")
+            table = {c: table[c] for c in candidates}
         if not table:
             raise RuntimeError("generation config has no lang_to_id table")
 

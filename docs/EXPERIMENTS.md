@@ -232,6 +232,25 @@ while the Trainer is mid-save instead of failing later inside safetensors.
 Drive checkpoints are read-only: nothing in this repo writes to, deletes, or
 assumes access to `whisper-training/`.
 
+### Known v1 limitation: language detection
+
+The v1 labels were tokenized with the processor's default prefix, which is
+`<|sot|><|notimestamps|>` — no `<|hi|>`, no `<|transcribe|>`. Transcription
+with a forced language prompt is unaffected (that is how every number above
+was produced), but the merged model's distribution at the position after
+`<|sot|>` no longer favours `<|hi|>`: unrestricted language detection on
+FLEURS Hindi clips returns `ca` with p≈0.65–0.73, while the same procedure on
+the base model returns `hi`. Evidence: `results/gpu_validation/report.json`,
+checks `language_detection_base_model` and `language_detection_adapter`.
+
+Consequences:
+
+- `language=None` with the v1 adapter must restrict candidates
+  (`ASRRunner(..., language_candidates=["hi", "en", "te"])`; the demo does).
+- `asr/training/lora.py` now calls `set_prefix_tokens(language, task)` so
+  labels match the serving prompt. The next training run should verify
+  unrestricted detection returns `hi` before it is promoted.
+
 ### Measuring latency while training runs
 
 Don't. RTF, p50 and p90 measured on a GPU that is simultaneously training

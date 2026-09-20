@@ -220,9 +220,18 @@ Hindi sentence like `मैं ठीक हूँ।` is only 12 characters, so
 threshold merges a whole short reply into one unit and silently disables
 sentence-level streaming.
 
-Synthesis is driven **lazily by playback**, so a barge-in during the first
-sentence stops the remaining sentences being synthesised at all, rather than
-generating audio and discarding it.
+Synthesis is driven **lazily by playback**: `iter_synthesis` yields each chunk
+as the backend produces it, so the first sentence plays while later ones are
+still being synthesised, and a barge-in during the first sentence stops the
+remaining sentences being synthesised at all, rather than generating audio
+and discarding it.
+
+This was claimed before it was true. Until 2026-09-20 the turn called the
+eager `synthesize_stream()`, which drained every sentence before the first
+chunk reached playback, so first-audio latency included the whole response
+and barge-in could not stop synthesis. The GPU validation sweep's barge-in
+check found it (`cancelled_after_chunk=1`, `chunks_synthesised=15`); two unit
+tests in `tests/test_agent.py` now pin the lazy behaviour.
 
 ---
 

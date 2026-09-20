@@ -72,6 +72,8 @@ class TrainingConfig:
 
 PRESETS: dict[str, dict] = {
     # Exactly the ledger's "Active run: Whisper-medium Hindi LoRA".
+    # NB: v1 itself was trained *without* the language token in its labels
+    # (see EXPERIMENTS.md); this preset now includes it, so a re-run is "v2".
     "v1": dict(
         model_name="openai/whisper-medium",
         dataset="fleurs",
@@ -214,6 +216,14 @@ def prepare_model(config: TrainingConfig):
     from transformers import WhisperForConditionalGeneration, WhisperProcessor
 
     processor = WhisperProcessor.from_pretrained(config.model_name)
+    # Labels are built by the tokenizer, whose default prefix is
+    # <|sot|><|notimestamps|> — no language or task token. Training on that
+    # teaches the model a distribution after <|sot|> that never contains
+    # <|hi|>, which is exactly the position language detection reads; the v1
+    # adapter was trained that way and detects "ca" on Hindi audio. Setting
+    # the prefix makes labels <|sot|><|hi|><|transcribe|><|notimestamps|> …,
+    # matching the serving prompt.
+    processor.tokenizer.set_prefix_tokens(language=config.language, task="transcribe")
     model = WhisperForConditionalGeneration.from_pretrained(
         config.model_name, torch_dtype=torch.float16 if config.fp16 else torch.float32,
     )

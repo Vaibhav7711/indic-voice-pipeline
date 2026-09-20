@@ -78,3 +78,25 @@ def test_detect_language_uses_sot_only_and_restricts_to_language_tokens():
     assert 0.5 < prob < 1.0          # softmax over {hi:0, en:4, te:5}
     assert ms >= 0.0
     assert dec.model.seen_inputs == [[[SOT]]]
+
+
+def test_strip_generate_output_handles_both_transformers_shapes():
+    dec = _decoder()
+    dec.gen_config.eos_token_id = 50257
+    content = [100, 200, 300]
+    # transformers < 5: prompt included, EOS at the end.
+    assert dec.strip_generate_output([SOT, HI, TRANSCRIBE, NOTS] + content + [50257]) == content
+    # transformers >= 5: prompt stripped already.
+    assert dec.strip_generate_output(content + [50257]) == content
+    # Explicit-loop output (content + EOS) reduces to the same thing.
+    assert dec.strip_generate_output(content + [50257]) == dec.strip_generate_output(content)
+    assert dec.strip_generate_output([]) == []
+
+
+def test_detect_language_candidates_restrict_the_argmax():
+    dec = _decoder(favoured=TE)              # te=5, en=4, hi=0
+    code, prob, _ = dec.detect_language(None, candidates=["hi", "en"])
+    assert code == "en"
+    assert prob > 0.9                        # softmax over {hi:0, en:4}
+    with pytest.raises(ValueError, match="unknown Whisper language codes"):
+        dec.detect_language(None, candidates=["hi", "xx"])

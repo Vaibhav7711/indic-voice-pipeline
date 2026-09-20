@@ -42,15 +42,13 @@ class TestExplicitVsGenerate:
                 features, max_new_tokens=50, language="en",
                 task="transcribe", do_sample=False,
             )
-        ref_list = ref_ids[0].tolist()
-        no_ts = whisper.model.generation_config.no_timestamps_token_id
-        ref_start = ref_list.index(no_ts) + 1 if no_ts in ref_list else 4
-        ref_output = ref_list[ref_start:]
+        ref_output = runner.decoder.strip_generate_output(ref_ids[0].tolist())
+        explicit_ids = runner.decoder.strip_generate_output(explicit.token_ids)
 
-        min_len = min(len(explicit.token_ids), len(ref_output))
+        min_len = min(len(explicit_ids), len(ref_output))
         if min_len == 0:
             return  # both produced nothing (valid for a sine wave)
-        matches = sum(a == b for a, b in zip(explicit.token_ids[:min_len], ref_output[:min_len], strict=True))
+        matches = sum(a == b for a, b in zip(explicit_ids[:min_len], ref_output[:min_len], strict=True))
         assert matches / min_len >= 0.8
 
     def test_metrics_populated(self, whisper, tone):

@@ -44,6 +44,8 @@ __all__ = [
     "SpeechStream",
     "StreamingSynthesizer",
     "EdgeStreamingSynthesizer",
+    "iter_synthesis",
+    "synthesize_stream",
 ]
 
 
@@ -225,29 +227,36 @@ class EdgeStreamingSynthesizer:
             thread.join(timeout=0.1)
 
 
-def synthesize_stream(
+def iter_synthesis(
     synthesizer: StreamingSynthesizer,
     text: str,
+    stream: SpeechStream,
     *,
     split: bool = True,
     on_chunk=None,
     should_stop=None,
-) -> SpeechStream:
-    """Drive a synthesizer over a response, sentence by sentence.
+) -> Iterator[AudioChunk]:
+    """Lazily drive a synthesizer over a response, sentence by sentence.
 
-    ``should_stop`` is polled between chunks so barge-in stops synthesis rather
-    than merely discarding audio that was already paid for.
+    Yields each :class:`AudioChunk` as the backend produces it and records it
+    on ``stream`` as it goes, so a consumer (playback) gets the first chunk
+    before the second sentence has been synthesised, and a consumer that stops
+    iterating (barge-in) stops synthesis rather than discarding audio that
+    was already paid for. ``should_stop`` is polled between chunks as well.
+
+    ``stream.total_ms`` and ``stream.error`` are finalised when the generator
+    finishes or is closed, whichever comes first.
     """
     start = perf_counter_ns()
-    sentences = split_sentences(text) if split else ([text] if text.strip() else [])
-    stream = SpeechStream(
-        sentences=sentences,
-        streaming=bool(getattr(synthesizer, "streaming", False)),
-    )
+    stream.sentences = split_sentences(text) if split else ([text] if text.strip() else [])
+    stream.streaming = bool(getattr(synthesizer, "streaming", False))
+    stream.chunks = []
+    stream.first_chunk_ms = None
+    stream.error = None
 
     index = 0
     try:
-        for sentence_index, sentence in enumerate(sentences):
+        for sentence_index, sentence in enumerate(stream.sentences):
             if should_stop is not None and should_stop():
                 break
             for data in synthesizer.stream(sentence):
@@ -261,8 +270,29 @@ def synthesize_stream(
                 stream.chunks.append(chunk)
                 if on_chunk is not None:
                     on_chunk(chunk)
+                yield chunk
     except Exception as exc:  # noqa: BLE001 - surfaced as state, not a crash
         stream.error = f"{type(exc).__name__}: {exc}"
+    finally:
+        stream.total_ms = (perf_counter_ns() - start) / 1_000_000
 
-    stream.total_ms = (perf_counter_ns() - start) / 1_000_000
+
+def synthesize_stream(
+    synthesizer: StreamingSynthesizer,
+    text: str,
+    *,
+    split: bool = True,
+    on_chunk=None,
+    should_stop=None,
+) -> SpeechStream:
+    """Drive a synthesizer to completion and return the collected stream.
+
+    Eager form of :func:`iter_synthesis`; the agent turn uses the iterator so
+    playback starts on the first chunk.
+    """
+    stream = SpeechStream()
+    for _chunk in iter_synthesis(
+        synthesizer, text, stream, split=split, on_chunk=on_chunk, should_stop=should_stop,
+    ):
+        pass
     return stream
