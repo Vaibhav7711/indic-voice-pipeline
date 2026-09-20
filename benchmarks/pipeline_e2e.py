@@ -18,7 +18,8 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--audio", required=True)
     parser.add_argument("--language", default="hi")
-    parser.add_argument("--whisper-model", default="openai/whisper-small")
+    parser.add_argument("--whisper-model", default="openai/whisper-medium")
+    parser.add_argument("--adapter", default=None, help="PEFT LoRA adapter directory")
     parser.add_argument("--llm-model", default="Qwen/Qwen3-0.6B")
     parser.add_argument("--llm-max-tokens", type=int, default=64)
     parser.add_argument("--warmup-runs", type=int, default=1)
@@ -30,7 +31,7 @@ def main():
     from llm import load_llm
     from pipeline import VoicePipeline
 
-    whisper = load_whisper(args.whisper_model)
+    whisper = load_whisper(args.whisper_model, adapter_path=args.adapter)
     llm = load_llm(args.llm_model)
     pipe = VoicePipeline(whisper, llm)
     print(f"Strategy: {pipe.strategy.value}")

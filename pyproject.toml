@@ -1,0 +1,49 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "indic-voice-pipeline"
+version = "0.2.0"
+description = "Correctness-first single-GPU Hindi voice pipeline: explicit Whisper loop, LoRA, LLM, streaming TTS"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+# torch is intentionally absent: Colab/Kaggle provide it, and pinning a CUDA
+# build here would fight the runtime. Install it separately elsewhere.
+dependencies = [
+    "numpy>=1.24",
+    "librosa>=0.10",
+    "soundfile>=0.12",
+    "transformers>=4.51",
+    "accelerate>=1.4",
+    "peft>=0.11",
+    # google/fleurs is script-backed; datasets>=4 removed loading-script support.
+    "datasets>=2.19,<4",
+    "evaluate>=0.4",
+    "jiwer>=3.0",
+    "edge-tts>=6.1",
+]
+
+[project.optional-dependencies]
+demo = ["gradio>=4.0"]
+dev = ["pytest>=8.0", "ruff>=0.6"]
+
+[tool.setuptools.packages.find]
+include = ["asr*", "llm*", "pipeline*", "tts*", "agent*", "benchmarks*", "text*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+extend-exclude = ["notebooks", "results"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP"]
+ignore = ["E501", "B008", "UP007", "UP035", "UP045"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["asr", "llm", "pipeline", "tts", "agent", "benchmarks", "text"]

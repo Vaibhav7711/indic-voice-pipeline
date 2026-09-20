@@ -3,13 +3,15 @@
 from __future__ import annotations
 
 import argparse
-import torch
+
 import numpy as np
+import torch
 
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--whisper-model", default="openai/whisper-small")
+    parser.add_argument("--whisper-model", default="openai/whisper-medium")
+    parser.add_argument("--llm-model", default="Qwen/Qwen3-0.6B")
     parser.add_argument("--adapter", default=None, help="Path to a PEFT LoRA adapter")
     args = parser.parse_args()
 
@@ -27,8 +29,8 @@ def main():
     print(f"Loading {args.whisper_model}...")
     whisper = load_whisper(args.whisper_model, adapter_path=args.adapter)
 
-    print("Loading Qwen3-0.6B...")
-    llm = load_llm("Qwen/Qwen3-0.6B")
+    print(f"Loading {args.llm_model}...")
+    llm = load_llm(args.llm_model)
 
     pipe = VoicePipeline(whisper, llm)
     print(f"Memory strategy: {pipe.strategy.value}")
@@ -36,8 +38,8 @@ def main():
 
     # Get a Hindi audio sample.
     print("Downloading FLEURS Hindi sample...")
-    from datasets import load_dataset
     import soundfile as sf
+    from datasets import load_dataset
 
     ds = load_dataset("google/fleurs", "hi_in", split="test", streaming=True)
     sample = next(iter(ds))

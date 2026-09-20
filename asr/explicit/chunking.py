@@ -8,9 +8,9 @@ It deliberately does *not* pretend to be VAD; endpointing is a later stage.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import re
 import unicodedata
+from dataclasses import dataclass
 
 import numpy as np
 
@@ -91,7 +91,7 @@ def merge_overlapping_transcripts(left: str, right: str, *, max_overlap_tokens: 
     for width in range(upper, 0, -1):
         left_keys = [_match_key(token) for token in left_tokens[-width:]]
         right_keys = [_match_key(token) for token in right_tokens[:width]]
-        if all(a and a == b for a, b in zip(left_keys, right_keys)):
+        if all(a and a == b for a, b in zip(left_keys, right_keys, strict=True)):
             overlap = width
             break
     return " ".join(left_tokens + right_tokens[overlap:])

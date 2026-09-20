@@ -32,7 +32,7 @@ Examples
     # Final test-set number for the fine-tuned adapter.
     python -m benchmarks.asr_eval run \
         --model openai/whisper-medium \
-        --adapter results/whisper-lora-hi-full/best \
+        --adapter Hugme6969/whisper-medium-hindi-lora \
         --split test --limit 300 --seed 0 \
         --out-dir results/eval/medium-lora-test
 
@@ -469,8 +469,13 @@ def command_run(args: argparse.Namespace) -> int:
 
     adapter_info = None
     if adapter:
-        from benchmarks.checkpoints import stage_checkpoint, verify_adapter
+        from benchmarks.checkpoints import (
+            resolve_hub_adapter,
+            stage_checkpoint,
+            verify_adapter,
+        )
 
+        adapter = str(resolve_hub_adapter(adapter))
         if args.stage_adapter:
             adapter = str(stage_checkpoint(adapter, args.stage_adapter))
             print(f"Staged adapter to local disk: {adapter}")
@@ -661,7 +666,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     run = sub.add_parser("run", help="transcribe and score (needs GPU)")
     run.add_argument("--model", default="openai/whisper-medium")
-    run.add_argument("--adapter", default=None, help="PEFT LoRA adapter directory")
+    run.add_argument("--adapter", default=None,
+                     help="PEFT LoRA adapter directory or Hub repo id")
     run.add_argument(
         "--adapter-dir",
         default=None,

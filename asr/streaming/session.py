@@ -69,7 +69,6 @@ from typing import Any, Protocol
 import numpy as np
 
 from asr.streaming.endpointer import (
-    EndpointerState,
     EndpointEventKind,
     StreamEndpointer,
 )
@@ -497,7 +496,7 @@ class StreamingSession:
         updates.append(self._state_update(SessionState.CLOSED))
         return updates
 
-    def reset(self) -> "StreamingSession":
+    def reset(self) -> StreamingSession:
         """Return a fresh session with the same transcriber and config."""
         return StreamingSession(
             self.transcriber,

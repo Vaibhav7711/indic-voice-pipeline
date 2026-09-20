@@ -20,7 +20,7 @@ def main() -> int:
     parser.add_argument("--output", default="results/streaming/voice_turn_gpu_smoke.json")
     args = parser.parse_args()
 
-    from agent import BufferSink, VoiceTurn
+    from agent import VoiceTurn
     from asr.explicit import ASRRunner, load_whisper
     from llm import LLMRunner, load_llm
     from tts import EdgeStreamingSynthesizer

@@ -84,10 +84,10 @@ Per-example flags also record `empty_hypothesis`, `repetition_loop`,
 ### Reproducing a number
 
 ```bash
-# Final test number for the fine-tuned adapter.
+# Final test number for the fine-tuned adapter (Hub id or local directory).
 python -m benchmarks.asr_eval run \
     --model openai/whisper-medium \
-    --adapter results/whisper-lora-hi-full/best \
+    --adapter Hugme6969/whisper-medium-hindi-lora \
     --split test --limit 300 --seed 0 \
     --out-dir results/eval/medium-lora-test
 
@@ -126,6 +126,13 @@ history but are **not comparable** to anything produced by `asr_eval.py`: the
 base model differs, the sample is a biased prefix, and the text policy differs.
 Do not cite them alongside new numbers.
 
+`results/whisper-lora-hi-full/best` is that whisper-small adapter (rank 16,
+FLEURS only, `--preset small-fleurs`; validation WER 39.25%, eval loss 0.364).
+It is **not** the v1 adapter and cannot be loaded onto whisper-medium. Its
+intermediate `checkpoint-*` directories were removed from the repository on
+2026-09-20 (they held ~330 MB of optimizer state); they remain in git history
+before that date.
+
 ## Active run: Whisper-medium Hindi LoRA
 
 | Field | Value |
@@ -140,6 +147,17 @@ Do not cite them alongside new numbers.
 | Checkpoint location | Drive `whisper-training/` (read-only to this repo) |
 | Final adapter | [`Hugme6969/whisper-medium-hindi-lora`](https://huggingface.co/Hugme6969/whisper-medium-hindi-lora) |
 | Status | **completed**: 3 epochs / 2,670 optimizer steps |
+| Recipe | `python asr/training/lora.py --preset v1 --output-dir <drive>/whisper-training` |
+
+**Provenance caveat.** The v1 run was launched from a Colab-side copy of the
+trainer that was never committed; the table above was recorded by hand at the
+time. `--preset v1` in `asr/training/lora.py` is a faithful reconstruction of
+that configuration (same model, data mix, LoRA targets, batch geometry and
+checkpoint policy) and every future run writes `train_config.json` beside its
+checkpoints, so this caveat applies to v1 only. A re-run from the preset should
+be recorded as a separate entry (`v1-repro`) and compared to v1 on validation
+WER; it will not be bit-identical (streamed IndicVoices decode order, Colab
+library versions).
 
 ### Validation history
 

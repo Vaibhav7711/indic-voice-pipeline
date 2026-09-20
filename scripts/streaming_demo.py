@@ -27,7 +27,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from agent import BufferSink, TurnState, VoiceTurn  # noqa: E402
 from asr.streaming import (  # noqa: E402
-    SessionState,
     StreamingConfig,
     StreamingSession,
     UpdateKind,

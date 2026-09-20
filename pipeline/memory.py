@@ -1,7 +1,7 @@
 """GPU memory management for multi-model pipeline on a single device.
 
-Whisper-small (488 MB) + Qwen3-0.6B (1.2 GiB) = ~1.7 GiB → concurrent on T4.
-Larger Indic LLMs → sequential (offload Whisper to CPU after transcription).
+Whisper-medium (1.5 GiB fp16) + Qwen3-0.6B (1.2 GiB) ≈ 2.7 GiB → concurrent on
+T4. A 7B-class LLM → sequential (offload Whisper to CPU after transcription).
 """
 
 from __future__ import annotations
@@ -42,7 +42,14 @@ def snapshot_vram(device: torch.device | None = None) -> VRAMSnapshot:
 
 
 def estimate_model_bytes(model: torch.nn.Module) -> int:
-    return sum(p.nelement() * p.element_size() for p in model.parameters())
+    """Resident weight bytes: parameters plus persistent buffers.
+
+    Deliberately excludes KV cache and activations — those are workload
+    dependent and covered by ``choose_strategy``'s headroom ratio.
+    """
+    params = sum(p.nelement() * p.element_size() for p in model.parameters())
+    buffers = sum(b.nelement() * b.element_size() for b in model.buffers())
+    return params + buffers
 
 
 def offload_to_cpu(model: torch.nn.Module) -> None:

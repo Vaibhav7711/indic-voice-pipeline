@@ -32,15 +32,21 @@ def load_whisper(
 ) -> LoadedWhisper:
     """Load Whisper, optionally merging a PEFT LoRA adapter for inference.
 
-    ``adapter_path`` must contain PEFT's ``adapter_config.json`` and
-    ``adapter_model.safetensors``. The adapter is merged before the explicit
-    runner receives the model, so its encoder/decoder and KV-cache path remain
-    exactly the same as base-model inference.
+    ``adapter_path`` is a local directory containing PEFT's
+    ``adapter_config.json`` and ``adapter_model.safetensors``, or a Hub repo id
+    such as ``Hugme6969/whisper-medium-hindi-lora`` (downloaded to the HF
+    cache). The adapter is merged before the explicit runner receives the
+    model, so its encoder/decoder and KV-cache path remain exactly the same as
+    base-model inference.
     """
     if not torch.cuda.is_available():
         raise RuntimeError("CUDA required. Use a GPU Colab runtime.")
 
-    adapter = Path(adapter_path).expanduser().resolve() if adapter_path else None
+    adapter = None
+    if adapter_path:
+        from benchmarks.checkpoints import resolve_hub_adapter
+
+        adapter = resolve_hub_adapter(adapter_path).expanduser().resolve()
     if adapter is not None:
         required = (adapter / "adapter_config.json", adapter / "adapter_model.safetensors")
         missing = [str(path) for path in required if not path.is_file()]

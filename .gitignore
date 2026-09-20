@@ -22,3 +22,17 @@ data/hard_set/audio/*
 
 # OS
 .DS_Store
+
+# Trainer resume state. A checkpoint's adapter weights + config are evidence;
+# optimizer/scheduler/RNG state is not, and it is ~40 MB per checkpoint.
+optimizer.pt
+scheduler.pt
+rng_state.pth
+scaler.pt
+trainer_state.json
+results/whisper-lora-*/checkpoint-*/
+results/streaming/*
+!results/streaming/*.json
+results/gpu_validation/*
+!results/gpu_validation/*.json
+!results/gpu_validation/*.md

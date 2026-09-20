@@ -13,9 +13,9 @@ import numpy as np
 import torch
 from transformers import WhisperForConditionalGeneration, WhisperProcessor
 
+from asr.explicit.chunking import AudioChunk, chunk_audio, merge_overlapping_transcripts
 from asr.explicit.decoder import WhisperDecoder
 from asr.explicit.encoder import WhisperEncoder
-from asr.explicit.chunking import AudioChunk, chunk_audio, merge_overlapping_transcripts
 from asr.explicit.mel import extract_mel, load_audio, load_audio_from_array
 
 
@@ -35,6 +35,9 @@ class ASRMetrics:
     peak_reserved_bytes: int = 0
     encoder_hidden_size: int = 0
     encoder_seq_length: int = 0
+    #: Only set when ``language=None`` triggered detection.
+    language_detection_ms: float | None = None
+    language_probability: float | None = None
 
     @property
     def mean_decode_ms(self) -> float:
@@ -202,7 +205,7 @@ class ASRRunner:
         )
         results: list[ASRResult] = []
         text = ""
-        for spec, chunk in windows:
+        for _spec, chunk in windows:
             # The waveform is already normalized to 16 kHz, so this call adds no resampling.
             result = self.transcribe_array(
                 chunk, 16_000, language=language, max_new_tokens=max_new_tokens,
@@ -213,7 +216,9 @@ class ASRRunner:
         total_ms = (perf_counter_ns() - total_start) / 1_000_000 + load_ms
         return LongFormASRResult(
             text=text,
-            language=language,
+            # With language=None each window detects independently; report
+            # the first window's decision as the utterance language.
+            language=language or (results[0].language if results else None),
             chunks=[spec for spec, _ in windows],
             chunk_results=results,
             metrics=LongFormMetrics(
@@ -246,13 +251,20 @@ class ASRRunner:
         metrics.encoder_hidden_size = enc.hidden_size
         metrics.encoder_seq_length = enc.sequence_length
 
-        # 3. Decoder prefill.
+        # 3. Language: detect from one decoder step when not given, so the
+        #    prompt is always the well-formed <|sot|><|lang|><|task|> sequence.
+        if language is None:
+            language, prob, detect_ms = self.decoder.detect_language(enc.encoder_outputs)
+            metrics.language_detection_ms = detect_ms
+            metrics.language_probability = prob
+
+        # 4. Decoder prefill.
         state, prefill_ms = self.decoder.prefill(
             enc.encoder_outputs, language=language,
         )
         metrics.decoder_prefill_ms = prefill_ms
 
-        # 4. Autoregressive decode loop.
+        # 5. Autoregressive decode loop.
         eos_ids = (
             {self.eos_token_id}
             if isinstance(self.eos_token_id, int)

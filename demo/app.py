@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import os
-import numpy as np
+
 import gradio as gr
+import numpy as np
 
 _pipe = None
 _tts = None
@@ -23,11 +24,11 @@ def _load():
     # Set WHISPER_ADAPTER_PATH to serve a trained LoRA adapter. Keeping this
     # configurable makes it impossible to accidentally demo the base model.
     w = load_whisper(
-        os.getenv("WHISPER_MODEL", "openai/whisper-small"),
+        os.getenv("WHISPER_MODEL", "openai/whisper-medium"),
         adapter_path=os.getenv("WHISPER_ADAPTER_PATH") or None,
     )
-    l = load_llm("Qwen/Qwen3-0.6B")
-    _pipe = VoicePipeline(w, l)
+    llm = load_llm(os.getenv("LLM_MODEL", "Qwen/Qwen3-0.6B"))
+    _pipe = VoicePipeline(w, llm)
     _tts = TTSSynthesizer(language="hi")
     return _pipe, _tts
 
@@ -47,7 +48,12 @@ def process(audio, language, max_tokens, do_tts):
     result = pipe.run_array(wav, sr, language=lang, llm_max_tokens=max_tokens)
 
     m = result.metrics
+    detected = (
+        f" (detected: {result.language}, p={m.asr.language_probability:.2f})"
+        if m.asr.language_probability is not None else ""
+    )
     table = (
+        f"Language: {result.language}{detected}\n\n"
         f"| Stage | ms |\n|---|---:|\n"
         f"| Mel | {m.asr.mel_extraction_ms:.0f} |\n"
         f"| Encoder | {m.asr.encoder_ms:.0f} |\n"
@@ -61,8 +67,9 @@ def process(audio, language, max_tokens, do_tts):
     audio_out = None
     if do_tts and result.answer.strip():
         import tempfile
-        path = tempfile.mktemp(suffix=".mp3")
-        tts.language = lang or "hi"
+        fd, path = tempfile.mkstemp(suffix=".mp3")
+        os.close(fd)
+        tts.language = result.language or "hi"
         r = tts.synthesize(result.answer, path)
         audio_out = path
         table += f"\nTTS: {r.synthesis_ms:.0f} ms"

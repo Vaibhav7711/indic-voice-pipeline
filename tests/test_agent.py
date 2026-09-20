@@ -21,8 +21,7 @@ from agent import (
     TurnState,
     VoiceTurn,
 )
-from tts.streaming import SpeechStream, split_sentences, synthesize_stream
-
+from tts.streaming import split_sentences, synthesize_stream
 
 # ---------------------------------------------------------------------------
 # Fakes

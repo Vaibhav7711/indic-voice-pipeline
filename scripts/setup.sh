@@ -16,21 +16,9 @@ pip install --upgrade pip
 # that does not obviously point at the cause. datasets 4.x also changed the
 # audio column from a {"array", "sampling_rate"} dict to a decoder object.
 # benchmarks/fleurs.py degrades gracefully, but this pin is the supported path.
-pip install \
-    transformers>=4.51 \
-    accelerate>=1.4 \
-    peft>=0.11 \
-    "datasets>=2.19,<4" \
-    evaluate>=0.4 \
-    jiwer>=3.0 \
-    librosa>=0.10 \
-    soundfile>=0.12 \
-    edge-tts>=6.1 \
-    gradio>=4.0 \
-    pytest>=8.0
-
+# Dependencies are declared once, in pyproject.toml.
 echo "Installing project as editable package..."
-pip install -e .
+pip install -e ".[demo,dev]"
 
 python - <<'PY'
 import torch

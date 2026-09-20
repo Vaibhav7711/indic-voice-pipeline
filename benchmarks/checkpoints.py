@@ -36,6 +36,8 @@ __all__ = [
     "latest_checkpoint",
     "best_checkpoint",
     "resolve_adapter",
+    "resolve_hub_adapter",
+    "is_hub_repo_id",
     "verify_adapter",
     "stage_checkpoint",
 ]
@@ -49,6 +51,33 @@ REQUIRED_FILES = ("adapter_config.json", "adapter_model.safetensors")
 
 class CheckpointError(RuntimeError):
     """Raised when a checkpoint is missing, incomplete or corrupt."""
+
+
+_HUB_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*/[A-Za-z0-9][A-Za-z0-9._-]*$")
+
+
+def is_hub_repo_id(value: str | Path) -> bool:
+    """``owner/name`` that does not exist on disk is a Hugging Face Hub id."""
+    text = str(value)
+    return bool(_HUB_ID_RE.match(text)) and not Path(text).exists()
+
+
+def resolve_hub_adapter(value: str | Path) -> Path:
+    """Return a local adapter directory for a path or a Hub repo id.
+
+    A local path is returned unchanged. A Hub id is downloaded (only the files
+    an adapter needs, into the normal HF cache) so that every caller —
+    ``load_whisper``, ``asr_eval``, the smoke scripts — can take either form.
+    """
+    if not is_hub_repo_id(value):
+        return Path(value)
+    from huggingface_hub import snapshot_download
+
+    local = snapshot_download(
+        repo_id=str(value),
+        allow_patterns=["*.json", "*.safetensors", "*.txt", "*.model", "README.md"],
+    )
+    return Path(local)
 
 
 def list_checkpoints(output_dir: str | Path) -> list[tuple[int, Path]]:

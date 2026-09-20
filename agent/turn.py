@@ -54,6 +54,7 @@ from time import perf_counter_ns
 from typing import Any, Protocol
 
 from agent.playback import AudioSink, BufferSink, PlaybackResult, PlaybackSession
+from llm.prompting import build_chat_prompt
 from tts.streaming import SpeechStream, split_sentences, synthesize_stream
 
 __all__ = [
@@ -208,26 +209,7 @@ class VoiceTurn:
             "be spoken aloud."
         )
         tokenizer = getattr(self.generator, "tokenizer", None)
-        if tokenizer is not None and hasattr(tokenizer, "apply_chat_template"):
-            messages = [
-                {"role": "system", "content": system},
-                {"role": "user", "content": transcript},
-            ]
-            try:
-                return tokenizer.apply_chat_template(
-                    messages,
-                    tokenize=False,
-                    add_generation_prompt=True,
-                    enable_thinking=False,
-                )
-            except (TypeError, ValueError):
-                try:
-                    return tokenizer.apply_chat_template(
-                        messages, tokenize=False, add_generation_prompt=True,
-                    )
-                except (TypeError, ValueError):
-                    pass
-        return f"System: {system}\n\nUser: {transcript}\n\nAssistant:"
+        return build_chat_prompt(tokenizer, system, transcript)
 
     # -- barge-in ---------------------------------------------------------
 

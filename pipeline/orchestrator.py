@@ -15,27 +15,16 @@ import torch
 from asr.explicit.loader import LoadedWhisper
 from asr.explicit.runner import ASRMetrics, ASRRunner
 from llm.loader import LoadedLLM
+from llm.prompting import build_chat_prompt, system_prompt_for
 from llm.runner import LLMRunner
 from pipeline.memory import (
-    MemoryStrategy, choose_strategy, estimate_model_bytes,
-    offload_to_cpu, reload_to_gpu, snapshot_vram,
+    MemoryStrategy,
+    choose_strategy,
+    estimate_model_bytes,
+    offload_to_cpu,
+    reload_to_gpu,
+    snapshot_vram,
 )
-
-
-SYSTEM_PROMPTS = {
-    "hi": (
-        "You are a helpful voice assistant. The user spoke in Hindi "
-        "(possibly code-switched with English). Respond entirely in natural "
-        "Hindi; keep unavoidable proper nouns and technical terms as-is. "
-        "Keep answers brief — this will be spoken aloud."
-    ),
-    "te": (
-        "You are a helpful voice assistant. The user spoke in Telugu "
-        "(possibly code-switched with English). Respond concisely."
-    ),
-    "en": "You are a helpful voice assistant. Respond concisely.",
-    None: "You are a helpful voice assistant. Respond concisely.",
-}
 
 
 @dataclass
@@ -109,21 +98,8 @@ class VoicePipeline:
         )
 
     def _build_prompt(self, transcript: str, language: str | None) -> str:
-        system = self.custom_system_prompt or SYSTEM_PROMPTS.get(
-            language, SYSTEM_PROMPTS[None],
-        )
-        if hasattr(self.llm.tokenizer, "apply_chat_template"):
-            try:
-                messages = [
-                    {"role": "system", "content": system},
-                    {"role": "user", "content": transcript},
-                ]
-                return self.llm.tokenizer.apply_chat_template(
-                    messages, tokenize=False, add_generation_prompt=True,
-                )
-            except Exception:
-                pass
-        return f"System: {system}\n\nUser: {transcript}\n\nAssistant:"
+        system = self.custom_system_prompt or system_prompt_for(language)
+        return build_chat_prompt(self.llm.tokenizer, system, transcript)
 
     def run(
         self,
@@ -133,29 +109,54 @@ class VoicePipeline:
         asr_max_tokens: int = 225,
         llm_max_tokens: int = 128,
     ) -> PipelineResult:
+        """Run the pipeline on an audio file."""
+        return self._run(
+            lambda: self.asr_runner.transcribe_file(
+                audio_path, language=language, max_new_tokens=asr_max_tokens,
+            ),
+            language, llm_max_tokens,
+        )
+
+    def run_array(
+        self,
+        waveform: np.ndarray,
+        sample_rate: int,
+        *,
+        language: str | None = None,
+        asr_max_tokens: int = 225,
+        llm_max_tokens: int = 128,
+    ) -> PipelineResult:
+        """Run pipeline on an in-memory waveform (Gradio/API)."""
+        return self._run(
+            lambda: self.asr_runner.transcribe_array(
+                waveform, sample_rate, language=language, max_new_tokens=asr_max_tokens,
+            ),
+            language, llm_max_tokens,
+        )
+
+    def _run(self, transcribe, language: str | None, llm_max_tokens: int) -> PipelineResult:
         pipe_start = perf_counter_ns()
         torch.cuda.reset_peak_memory_stats(self.device)
         metrics = PipelineMetrics(memory_strategy=self.strategy.value)
+        sequential = self.strategy == MemoryStrategy.SEQUENTIAL
 
         # ASR.
-        if self.strategy == MemoryStrategy.SEQUENTIAL:
+        if sequential:
             reload_to_gpu(self.whisper.model, self.device, self.whisper.dtype)
-
-        asr_result = self.asr_runner.transcribe_file(
-            audio_path, language=language, max_new_tokens=asr_max_tokens,
-        )
+        asr_result = transcribe()
         metrics.asr = asr_result.metrics
         metrics.vram_after_asr_gib = snapshot_vram(self.device).allocated_gib
 
         # Model swap (sequential only).
-        if self.strategy == MemoryStrategy.SEQUENTIAL:
+        if sequential:
             swap_start = perf_counter_ns()
             offload_to_cpu(self.whisper.model)
             reload_to_gpu(self.llm.model, self.device, self.llm.dtype)
             metrics.model_swap_ms = (perf_counter_ns() - swap_start) / 1_000_000
 
-        # LLM.
-        prompt = self._build_prompt(asr_result.text, language or asr_result.language)
+        # LLM. The ASR result carries the detected language when none was given.
+        language = language or asr_result.language
+        prompt = self._build_prompt(asr_result.text, language)
         llm_result = self.llm_runner.generate(prompt, max_new_tokens=llm_max_tokens)
 
         metrics.llm_prefill_ms = llm_result.metrics.prefill_ms
@@ -164,7 +165,7 @@ class VoicePipeline:
         metrics.llm_tokens_generated = llm_result.metrics.generated_tokens
         metrics.vram_after_llm_gib = snapshot_vram(self.device).allocated_gib
 
-        if self.strategy == MemoryStrategy.SEQUENTIAL:
+        if sequential:
             offload_to_cpu(self.llm.model)
             reload_to_gpu(self.whisper.model, self.device, self.whisper.dtype)
 
@@ -175,42 +176,6 @@ class VoicePipeline:
             transcript=asr_result.text,
             answer=llm_result.text,
             answer_token_ids=llm_result.token_ids,
-            language=language or asr_result.language,
-            metrics=metrics,
-        )
-
-    def run_array(
-        self,
-        waveform: np.ndarray,
-        sample_rate: int,
-        *,
-        language: str | None = None,
-        llm_max_tokens: int = 128,
-    ) -> PipelineResult:
-        """Run pipeline on in-memory waveform (Gradio/API)."""
-        pipe_start = perf_counter_ns()
-        torch.cuda.reset_peak_memory_stats(self.device)
-        metrics = PipelineMetrics(memory_strategy=self.strategy.value)
-
-        asr_result = self.asr_runner.transcribe_array(
-            waveform, sample_rate, language=language,
-        )
-        metrics.asr = asr_result.metrics
-
-        prompt = self._build_prompt(asr_result.text, language or asr_result.language)
-        llm_result = self.llm_runner.generate(prompt, max_new_tokens=llm_max_tokens)
-
-        metrics.llm_prefill_ms = llm_result.metrics.prefill_ms
-        metrics.llm_decode_ms = llm_result.metrics.decode_ms
-        metrics.llm_total_ms = llm_result.metrics.total_ms
-        metrics.llm_tokens_generated = llm_result.metrics.generated_tokens
-        metrics.total_pipeline_ms = (perf_counter_ns() - pipe_start) / 1_000_000
-        metrics.peak_allocated_bytes = torch.cuda.max_memory_allocated(self.device)
-
-        return PipelineResult(
-            transcript=asr_result.text,
-            answer=llm_result.text,
-            answer_token_ids=llm_result.token_ids,
-            language=language or asr_result.language,
+            language=language,
             metrics=metrics,
         )

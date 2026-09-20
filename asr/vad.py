@@ -46,7 +46,7 @@ def _runs(mask: np.ndarray) -> list[tuple[int, int]]:
     """Return half-open runs of true frame indexes."""
     starts = np.flatnonzero(np.diff(np.r_[False, mask, False].astype(np.int8)) == 1)
     ends = np.flatnonzero(np.diff(np.r_[False, mask, False].astype(np.int8)) == -1)
-    return list(zip(starts.tolist(), ends.tolist()))
+    return list(zip(starts.tolist(), ends.tolist(), strict=True))
 
 
 def detect_speech(

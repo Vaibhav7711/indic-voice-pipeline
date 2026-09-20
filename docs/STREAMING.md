@@ -304,3 +304,11 @@ session = StreamingSession(runner, StreamingConfig(language="hi"))
 The gaps that matter most, in order: a real `AudioSink` for actual audio output,
 a streaming LLM backend to replace the prefill proxy, and a local TTS engine to
 remove the network round trip from the critical path.
+
+### Validation status
+
+Everything in this document is exercised against real models by
+`scripts/gpu_validation.py` (Kaggle notebook:
+`notebooks/gpu_validation_kaggle.ipynb`). Until `results/gpu_validation/report.json`
+is committed with a passing sweep, the "production logic" rows above mean
+"unit-tested against fakes", not "observed working on a GPU".

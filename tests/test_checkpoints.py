@@ -222,3 +222,21 @@ class TestStageCheckpoint:
     def test_staged_dir_named_after_checkpoint(self, tmp_path):
         ckpt = make_checkpoint(tmp_path / "drive", 1800)
         assert stage_checkpoint(ckpt, tmp_path / "local").name == "checkpoint-1800"
+
+
+class TestHubResolution:
+    def test_owner_name_that_is_not_on_disk_is_a_hub_id(self, tmp_path):
+        from benchmarks.checkpoints import is_hub_repo_id
+
+        assert is_hub_repo_id("Hugme6969/whisper-medium-hindi-lora")
+        assert not is_hub_repo_id("results/whisper-lora-hi-full/best")
+        assert not is_hub_repo_id("/content/adapters/best")
+        local = tmp_path / "owner" / "name"
+        local.mkdir(parents=True)
+        assert not is_hub_repo_id(str(local))
+
+    def test_local_path_passes_through_without_network(self, tmp_path, monkeypatch):
+        import benchmarks.checkpoints as ck
+
+        monkeypatch.setattr(ck, "is_hub_repo_id", lambda v: False)
+        assert ck.resolve_hub_adapter(tmp_path) == tmp_path

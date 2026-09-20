@@ -13,6 +13,7 @@ For Hindi transcription: [startoftranscript, hi, transcribe, notimestamps]
 from __future__ import annotations
 
 from dataclasses import dataclass
+from time import perf_counter_ns
 
 import torch
 from transformers import WhisperForConditionalGeneration
@@ -41,30 +42,47 @@ class WhisperDecoder:
         self.device = device
         self.gen_config = model.generation_config
 
+    def _language_token_ids(self) -> dict[str, int]:
+        """``{"hi": 50276, ...}`` from the generation config, accepting either
+        ``<|hi|>`` or ``hi`` key spellings."""
+        lang_to_id = getattr(self.gen_config, "lang_to_id", {}) or {}
+        table: dict[str, int] = {}
+        for key, token_id in lang_to_id.items():
+            code = key[2:-2] if key.startswith("<|") and key.endswith("|>") else key
+            table[code] = int(token_id)
+        return table
+
     def _build_prompt_ids(
         self,
-        language: str | None = None,
+        language: str,
         task: str = "transcribe",
         timestamps: bool = False,
     ) -> list[int]:
-        """Build the 3-4 token decoder prompt sequence."""
+        """Build the decoder prompt ``<|sot|> <|lang|> <|task|> [<|notimestamps|>]``.
+
+        Whisper's prompt grammar puts the language token immediately after
+        ``<|startoftranscript|>``. Skipping it and going straight to the task
+        token is a sequence the model never saw in training, so ``language``
+        is required here; callers that want auto-detection run
+        :meth:`detect_language` first.
+        """
+        if not language:
+            raise ValueError(
+                "language is required to build a Whisper prompt; call "
+                "detect_language() first for automatic detection",
+            )
         ids: list[int] = [self.gen_config.decoder_start_token_id]
 
-        # Language token.
-        if language is not None:
-            lang_to_id = getattr(self.gen_config, "lang_to_id", {}) or {}
-            # Try both "<|hi|>" and "hi" formats.
-            lang_id = lang_to_id.get(f"<|{language}|>") or lang_to_id.get(language)
-            if lang_id is not None:
-                ids.append(lang_id)
+        lang_id = self._language_token_ids().get(language)
+        if lang_id is None:
+            raise ValueError(f"unknown Whisper language code {language!r}")
+        ids.append(lang_id)
 
-        # Task token.
         task_to_id = getattr(self.gen_config, "task_to_id", {}) or {}
         task_id = task_to_id.get(task)
         if task_id is not None:
             ids.append(task_id)
 
-        # No-timestamps token.
         if not timestamps:
             no_ts = getattr(self.gen_config, "no_timestamps_token_id", None)
             if no_ts is not None:
@@ -73,11 +91,43 @@ class WhisperDecoder:
         return ids
 
     @torch.inference_mode()
+    def detect_language(
+        self, encoder_outputs: BaseModelOutput,
+    ) -> tuple[str, float, float]:
+        """Predict the spoken language from a single decoder step.
+
+        Runs the decoder on ``<|startoftranscript|>`` alone and takes the
+        argmax over language tokens only — the same procedure Whisper's
+        reference implementation uses. Returns ``(code, probability, ms)``.
+        """
+        table = self._language_token_ids()
+        if not table:
+            raise RuntimeError("generation config has no lang_to_id table")
+
+        decoder_input_ids = torch.tensor(
+            [[self.gen_config.decoder_start_token_id]], dtype=torch.long,
+            device=self.device,
+        )
+        start = perf_counter_ns()
+        logits = self.model(
+            encoder_outputs=encoder_outputs,
+            decoder_input_ids=decoder_input_ids,
+            use_cache=False,
+            return_dict=True,
+        ).logits[0, -1].float()
+        codes = list(table)
+        ids = torch.tensor([table[c] for c in codes], device=logits.device)
+        probs = torch.softmax(logits[ids], dim=-1)
+        best = int(probs.argmax().item())
+        ms = (perf_counter_ns() - start) / 1_000_000
+        return codes[best], float(probs[best].item()), ms
+
+    @torch.inference_mode()
     def prefill(
         self,
         encoder_outputs: BaseModelOutput,
         *,
-        language: str | None = None,
+        language: str,
         task: str = "transcribe",
         timestamps: bool = False,
     ) -> tuple[DecoderState, float]:

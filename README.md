@@ -1,8 +1,9 @@
 # indic-voice-pipeline
 
 A correctness-first, single-GPU Indic voice pipeline for Google Colab. Takes
-Hindi/Telugu speech as input, transcribes it, generates an LLM answer, and
-speaks it back — owning every stage of the inference loop.
+Hindi speech as input, transcribes it, generates an LLM answer, and speaks it
+back — owning every stage of the inference loop. (Telugu has a TTS voice and a
+system prompt, but no adapter or evaluation yet; treat it as untested.)
 
 ```text
 Audio → Mel → Whisper Encoder → Whisper Decoder (autoregressive) → LLM → TTS
@@ -17,8 +18,9 @@ only as correctness references in tests, never in the execution path.
 
 Indian speech has specific challenges that off-the-shelf ASR doesn't handle
 well: Hindi-English code-switching, retroflex consonants (ट vs त), schwa
-deletion, and accented/noisy speech. This project fine-tunes Whisper for
-Hindi and wires it into a full voice pipeline on a single T4 GPU.
+deletion, and accented/noisy speech. This project fine-tunes Whisper-medium for
+Hindi (**40.4% → 25.8% WER** on FLEURS Hindi test, see below) and wires it into
+a full voice pipeline on a single T4 GPU.
 
 ## Run in Google Colab
 
@@ -34,6 +36,13 @@ Choose **Runtime → Change runtime type → T4 GPU**, then run:
 For the full evaluation workflow — base vs adapter on identical audio, guarded
 comparison, error analysis and hard-set bootstrap — open
 [`notebooks/eval_colab.ipynb`](notebooks/eval_colab.ipynb) in Colab.
+
+To validate everything built *after* the harness — served runner vs
+`generate()`, language detection, streaming session, LLM decoding fixes,
+pipeline waterfall, voice turn with real TTS and barge-in — run
+[`notebooks/gpu_validation_kaggle.ipynb`](notebooks/gpu_validation_kaggle.ipynb)
+on Kaggle (GPU + Internet on). It drives `scripts/gpu_validation.py` and
+writes `results/gpu_validation/report.json` with a pass/fail per check.
 
 > `scripts/setup.sh` pins `datasets<4` deliberately. `google/fleurs` is still a
 > script-backed dataset and `datasets>=4.0` removed loading-script support, so
@@ -68,12 +77,13 @@ asr/
     endpointer.py     Online (frame-synchronous) speech endpointing
     session.py        Stateful streaming session with partial updates
   training/
-    lora.py           LoRA fine-tuning on FLEURS/CommonVoice Hindi
+    lora.py           LoRA fine-tuning; --preset v1 is the shipped recipe
   vad.py              Offline energy VAD (the endpointer's reference)
 
 llm/
     runner.py         Explicit LLM decode runner (prefill/decode split)
     loader.py         Model loader for Indic-capable LLMs
+    prompting.py      The one chat-prompt builder (thinking mode off)
 
 pipeline/
     orchestrator.py   ASR → LLM chaining with memory management
@@ -91,10 +101,8 @@ benchmarks/
     compare.py        Guarded run-vs-run comparison
     fleurs.py         FLEURS loading compatibility across datasets versions
     checkpoints.py    Checkpoint discovery, integrity checks, local staging
-    asr_latency.py    Per-stage ASR timing with multi-run statistics
     asr_wer.py        Legacy single-number WER script (superseded by asr_eval)
     pipeline_e2e.py   Full waterfall benchmark
-    memory_profile.py VRAM timeline across pipeline stages
 
 text/
     normalize.py      Hindi/Hinglish normalization ladder
@@ -115,9 +123,14 @@ tests/
     test_checkpoints.py  Checkpoint resolution and torn-write detection
     test_streaming.py Endpointer and streaming session (CPU only)
     test_agent.py     Playback, barge-in, turn latency (CPU only)
+    test_prompting.py Shared chat-prompt builder (CPU only)
+    test_decoder_prompt.py  Whisper prompt grammar + language detection (CPU)
+    test_llm_select.py      Repetition penalty (CPU only)
+    test_training_config.py Training presets match the ledger (CPU only)
 
 notebooks/
     eval_colab.ipynb  End-to-end GPU evaluation workflow for Colab
+    gpu_validation_kaggle.ipynb  Stage 3-5 validation sweep on Kaggle GPU
 
 agent/
     playback.py       Playback lifecycle and thread-safe barge-in
@@ -129,6 +142,14 @@ demo/
 scripts/
     setup.sh          Colab dependency installation
     preflight.py      GPU/import verification
+    streaming_demo.py Simulated streaming turn (no GPU)
+    streaming_gpu_smoke.py   Real Whisper behind StreamingSession, file replay
+    voice_turn_gpu_smoke.py  One real ASR → LLM → TTS turn
+    gpu_validation.py        All post-harness checks → results/gpu_validation/
+
+results/
+    eval/             Committed asr_eval runs backing docs/EXPERIMENTS.md
+    whisper-lora-hi-full/best   Superseded whisper-small adapter (history only)
 ```
 
 ## Architecture
@@ -143,24 +164,25 @@ Hindi/English audio (16 kHz WAV)
 └──────────────┬───────────────────┘
                ▼
 ┌──────────────────────────────────┐
-│  Whisper encoder (GPU)           │  12 layers, bidirectional self-attn
-│  Timed: CUDA events              │  Output: (1, 1500, 768)
-│  Runs ONCE per audio chunk       │  ~100-200 ms on T4
+│  Whisper-medium encoder (GPU)    │  24 layers, bidirectional self-attn
+│  Timed: CUDA events              │  Output: (1, 1500, 1024)
+│  Runs ONCE per audio chunk       │  ~67 ms on T4 (fp16, measured)
 └──────────────┬───────────────────┘
                ▼
 ┌──────────────────────────────────┐
-│  Whisper decoder (GPU)           │  12 layers, causal self-attn +
-│  Autoregressive, token-by-token  │  cross-attn to encoder output
-│  Dual KV cache:                  │  Self-attn cache grows per token
-│    self-attn (grows)             │  Cross-attn cache fixed (50.6 MB)
-│    cross-attn (fixed)            │
-│  Timed: per-step CUDA events     │  ~5-10 ms/token on T4
+│  Whisper-medium decoder (GPU)    │  24 layers, causal self-attn +
+│  Language detect if not given    │  cross-attn to encoder output
+│  Autoregressive, token-by-token  │  Self-attn cache grows per token
+│  Dual KV cache:                  │  Cross-attn cache fixed
+│    self-attn (grows)             │  ~29 ms prefill, ~20 ms/token on T4
+│    cross-attn (fixed)            │  (measured, LoRA merged)
 └──────────────┬───────────────────┘
                ▼
 ┌──────────────────────────────────┐
-│  LLM (GPU)                       │  Qwen3-0.6B (or Indic model)
+│  LLM (GPU)                       │  Qwen3-0.6B (thinking disabled)
 │  Explicit prefill/decode loop    │  Chat-templated prompt from
-│  Timed: CUDA events              │  transcript + Indic system prompt
+│  Repetition penalty + loop guard │  transcript + Hindi system prompt
+│  Timed: CUDA events              │
 └──────────────┬───────────────────┘
                ▼
 ┌──────────────────────────────────┐
@@ -176,11 +198,14 @@ from asr.explicit import load_whisper, ASRRunner
 from llm import load_llm, LLMRunner
 from pipeline import VoicePipeline
 
-whisper = load_whisper("openai/whisper-small")
+whisper = load_whisper(
+    "openai/whisper-medium",
+    adapter_path="Hugme6969/whisper-medium-hindi-lora",  # or a local directory
+)
 llm = load_llm("Qwen/Qwen3-0.6B")
 pipe = VoicePipeline(whisper, llm)
 
-result = pipe.run("hindi_audio.wav", language="hi")
+result = pipe.run("hindi_audio.wav", language="hi")  # language=None auto-detects
 print(result.transcript)        # Hindi transcription
 print(result.answer)            # LLM response
 print(result.metrics.as_dict()) # Full latency waterfall
@@ -199,13 +224,19 @@ whisper = load_whisper(
 )
 ```
 
-For the Gradio demo, set `WHISPER_ADAPTER_PATH` to the adapter directory. For
-the command-line demo:
+For the Gradio demo, set `WHISPER_ADAPTER_PATH` to the adapter directory
+(and optionally `WHISPER_MODEL`, `LLM_MODEL`). For the command-line demo:
 
 ```bash
-python scripts/demo.py --whisper-model openai/whisper-medium \
-  --adapter /content/drive/MyDrive/whisper-training/checkpoint-600
+python scripts/demo.py --adapter /content/drive/MyDrive/whisper-training/best
 ```
+
+**Which adapter is which.** The v1 result below is the **whisper-medium**
+adapter published at
+[`Hugme6969/whisper-medium-hindi-lora`](https://huggingface.co/Hugme6969/whisper-medium-hindi-lora).
+The directory `results/whisper-lora-hi-full/best` committed in this repo is an
+older **whisper-small** adapter (39.3% validation WER) kept for history; it
+cannot be loaded onto whisper-medium.
 
 ### Transcribe recordings longer than 30 seconds
 
@@ -255,15 +286,15 @@ the dual KV cache, and the per-stage latency. Owning the loop exposes:
 
 ### Why LoRA, not QLoRA?
 
-Whisper-small is 244M params = 488 MB in FP16. LoRA rank-16 adds ~3.5M
-trainable params. Total training memory with batch 4 + gradient
-checkpointing: ~6-7 GiB. T4 has 16 GiB. There is no memory problem to
-solve. QLoRA would add NF4 dequantization overhead to solve a nonexistent
-constraint.
+Whisper-medium is 769M params = 1.5 GiB in FP16. LoRA rank-16 on q/k/v/out
+adds ~9.4M trainable params. Training memory with batch 2 × 4 accumulation and
+gradient checkpointing stays well inside a T4's 16 GiB. There is no memory
+problem to solve; QLoRA would add NF4 dequantization overhead to solve a
+nonexistent constraint.
 
 ### Why edge-tts instead of a GPU TTS model?
 
-On T4, VRAM is split between Whisper (~488 MB) and the LLM (~1.2 GiB). A
+On T4, VRAM is split between Whisper (~1.5 GiB) and the LLM (~1.2 GiB). A
 GPU-based TTS model (VITS, StyleTTS2: 80-150 MB) would compete for the same
 memory. edge-tts provides high-quality Hindi/Telugu neural voices at zero
 GPU cost. The interface is designed so swapping in a local TTS model is a
@@ -271,8 +302,8 @@ single module change.
 
 ### Memory strategy
 
-Whisper-small (488 MB) + Qwen3-0.6B (1.2 GiB) fit concurrently on T4
-(~1.7 GiB total, well under 16 GiB). For larger Indic LLMs, the pipeline
+Whisper-medium (1.5 GiB) + Qwen3-0.6B (1.2 GiB) fit concurrently on T4
+(~2.7 GiB total, well under 16 GiB). For larger Indic LLMs, the pipeline
 auto-detects and switches to sequential mode: offload Whisper to CPU after
 transcription, load LLM, pay the swap cost. The strategy is chosen by
 measurement at construction time.
@@ -283,7 +314,7 @@ measurement at construction time.
 # Final test number (GPU). Seeded random sample, never a prefix slice.
 python -m benchmarks.asr_eval run \
     --model openai/whisper-medium \
-    --adapter results/whisper-lora-hi-full/best \
+    --adapter Hugme6969/whisper-medium-hindi-lora \
     --split test --limit 300 --seed 0 \
     --out-dir results/eval/medium-lora-test
 
@@ -304,42 +335,41 @@ CPU, and saved predictions can be re-scored anywhere.
 
 ## Measured Colab T4 results
 
-_To be filled after running benchmarks. The numbers below predate
-`benchmarks/asr_eval.py` and are not comparable to it — different base model,
-biased 50-example prefix sample, no normalization policy, no CER._
+All numbers below are from `benchmarks/asr_eval.py` on the same seeded random
+300-example subset of FLEURS Hindi test (`--seed 0`, `standard` normalization,
+Tesla T4, fp16, LoRA merged, explicit `ASRRunner`). Evidence:
+`results/eval/medium-base-test-300-seed0/`, `results/eval/medium-lora-test-300-seed0/`.
 
-### ASR baseline (Whisper-small, no fine-tuning)
+### ASR quality: Whisper-medium base vs Hindi LoRA v1
 
-| Metric | Result |
-| --- | ---: |
-| Mel extraction | ___ ms |
-| Encoder forward | ___ ms |
-| Decoder prefill | ___ ms |
-| Mean decode/token | ___ ms |
-| Total ASR | ___ ms |
-| RTF | ___ |
-| WER (FLEURS Hindi) | ___% |
+| Metric | Base | LoRA v1 | Change |
+| --- | ---: | ---: | ---: |
+| WER (standard) | 40.43% | **25.82%** | −14.60 pp (−36.1% rel.) |
+| CER (standard) | 16.74% | **9.61%** | −7.13 pp |
+| WER (raw, no normalization) | 43.06% | 26.62% | |
+| WER (orthography-blind) | 39.09% | 24.26% | |
+| Truncation errors | 27 | 0 | |
+| Hallucination-run errors | 16 | 0 | |
 
-### ASR fine-tuned (LoRA rank-16, FLEURS Hindi)
+### ASR latency per utterance (mean over 300, LoRA v1)
 
-| Metric | Result |
-| --- | ---: |
-| WER (before) | ___% |
-| WER (after) | ___% |
-| Improvement | ___ pp |
+| Stage | Base | LoRA v1 |
+| --- | ---: | ---: |
+| Mel extraction | 7.6 ms | 9.4 ms |
+| Encoder forward | 66.0 ms | 66.9 ms |
+| Decoder prefill | 28.7 ms | 29.0 ms |
+| Mean decode / token | 19.9 ms | 20.4 ms |
+| Decoder steps | 122.6 | 124.2 |
+| Total ASR p50 / p90 | 2461 / 3730 ms | 2540 / 3851 ms |
+| Mean RTF | 0.230 | 0.238 |
+
+Decode dominates: ~124 tokens × ~20 ms ≈ 2.5 s of a 2.6 s utterance. The
+merged adapter costs ~3% latency.
 
 ### Full pipeline waterfall
 
-| Stage | Time |
-| --- | ---: |
-| Mel extraction | ___ ms |
-| Whisper encoder | ___ ms |
-| ASR decode (___ tokens) | ___ ms |
-| LLM prefill | ___ ms |
-| LLM decode (___ tokens) | ___ ms |
-| **Total pipeline** | **___ ms** |
-| Audio → first LLM token | ___ ms |
-| Peak VRAM | ___ GiB |
+Not yet measured with the v1 adapter. `benchmarks/pipeline_e2e.py --adapter …`
+produces it; the table will be filled from its JSON output, not by hand.
 
 ## Correctness policy
 

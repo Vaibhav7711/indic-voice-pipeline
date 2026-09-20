@@ -10,9 +10,9 @@ machine is unit-testable on CPU against a fake transcriber.
 """
 
 from asr.streaming.endpointer import (
+    EndpointerState,
     EndpointEvent,
     EndpointEventKind,
-    EndpointerState,
     StreamEndpointer,
 )
 from asr.streaming.session import (

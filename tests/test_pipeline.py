@@ -20,8 +20,8 @@ def pipe():
     from pipeline import VoicePipeline
 
     w = load_whisper("openai/whisper-small")
-    l = load_llm("Qwen/Qwen3-0.6B")
-    return VoicePipeline(w, l)
+    llm = load_llm("Qwen/Qwen3-0.6B")
+    return VoicePipeline(w, llm)
 
 
 @pytest.fixture(scope="module")

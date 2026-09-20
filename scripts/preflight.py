@@ -37,10 +37,10 @@ def main():
 
     # Project imports.
     try:
-        from asr.explicit import load_whisper, ASRRunner
-        from llm import load_llm, LLMRunner
-        from pipeline import VoicePipeline
-        from tts import TTSSynthesizer
+        from asr.explicit import ASRRunner, load_whisper  # noqa: F401
+        from llm import LLMRunner, load_llm  # noqa: F401
+        from pipeline import VoicePipeline  # noqa: F401
+        from tts import TTSSynthesizer  # noqa: F401
         print("  Project modules: OK")
     except ImportError as e:
         errors.append(f"Project import failed: {e}")

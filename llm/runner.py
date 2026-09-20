@@ -21,6 +21,9 @@ class LLMMetrics:
     prompt_tokens: int = 0
     generated_tokens: int = 0
     peak_allocated_bytes: int = 0
+    #: Set when the n-gram loop guard cut generation short. A stop that came
+    #: from EOS or the token budget leaves this False.
+    stopped_on_repetition: bool = False
 
     @property
     def mean_decode_ms(self) -> float:
@@ -35,6 +38,7 @@ class LLMMetrics:
             "prompt_tokens": self.prompt_tokens,
             "generated_tokens": self.generated_tokens,
             "peak_allocated_bytes": self.peak_allocated_bytes,
+            "stopped_on_repetition": self.stopped_on_repetition,
         }
 
 
@@ -53,13 +57,33 @@ class LLMRunner:
         model: AutoModelForCausalLM,
         tokenizer: AutoTokenizer,
         device: torch.device,
+        *,
+        repetition_penalty: float = 1.1,
+        loop_guard_ngram: int = 4,
     ):
         self.model = model
         self.tokenizer = tokenizer
         self.device = device
+        # Greedy decoding on a small model loops easily. The penalty (CTRL-style:
+        # divide positive / multiply negative logits of already-seen tokens)
+        # makes loops unlikely; the n-gram guard is the backstop that ends one
+        # if it still happens, and the metrics say when it fired.
+        self.repetition_penalty = repetition_penalty
+        self.loop_guard_ngram = loop_guard_ngram
 
         eos = tokenizer.eos_token_id
         self.eos_ids: set[int] = {eos} if isinstance(eos, int) else set(eos or [])
+
+    def _select(self, logits: torch.Tensor, seen: list[int]) -> torch.Tensor:
+        """Greedy pick after repetition penalty. ``logits`` is (1, vocab)."""
+        if self.repetition_penalty != 1.0 and seen:
+            logits = logits.float().clone()
+            ids = torch.tensor(sorted(set(seen)), device=logits.device)
+            scores = logits[0, ids]
+            logits[0, ids] = torch.where(
+                scores > 0, scores / self.repetition_penalty, scores * self.repetition_penalty,
+            )
+        return logits.argmax(dim=-1, keepdim=True)
 
     def generate(self, prompt: str, *, max_new_tokens: int = 128) -> LLMResult:
         """Generate text from a prompt with explicit prefill/decode and timing."""
@@ -90,18 +114,22 @@ class LLMRunner:
         pf_end.synchronize()
         metrics.prefill_ms = pf_start.elapsed_time(pf_end)
 
-        next_token = outputs.logits[:, -1, :].argmax(dim=-1, keepdim=True)
+        seen = input_ids[0].tolist()
+        next_token = self._select(outputs.logits[:, -1, :], seen)
         past_kv = outputs.past_key_values
         generated: list[int] = []
+        n = self.loop_guard_ngram
 
         # Decode loop.
-        for step in range(max_new_tokens):
+        for _step in range(max_new_tokens):
             token_id = int(next_token.item())
             generated.append(token_id)
+            seen.append(token_id)
             if token_id in self.eos_ids:
                 break
-            if len(generated) >= 8 and generated[-4:] == generated[-8:-4]:
-                generated = generated[:-4]
+            if n and len(generated) >= 2 * n and generated[-n:] == generated[-2 * n:-n]:
+                generated = generated[:-n]
+                metrics.stopped_on_repetition = True
                 break
 
             attention_mask = torch.cat([
@@ -124,7 +152,7 @@ class LLMRunner:
             d_end.synchronize()
             metrics.decode_ms.append(d_start.elapsed_time(d_end))
 
-            next_token = outputs.logits[:, -1, :].argmax(dim=-1, keepdim=True)
+            next_token = self._select(outputs.logits[:, -1, :], seen)
             past_kv = outputs.past_key_values
 
         metrics.generated_tokens = len(generated)

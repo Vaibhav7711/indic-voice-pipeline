@@ -50,7 +50,7 @@ class TestExplicitVsGenerate:
         min_len = min(len(explicit.token_ids), len(ref_output))
         if min_len == 0:
             return  # both produced nothing (valid for a sine wave)
-        matches = sum(a == b for a, b in zip(explicit.token_ids[:min_len], ref_output[:min_len]))
+        matches = sum(a == b for a, b in zip(explicit.token_ids[:min_len], ref_output[:min_len], strict=True))
         assert matches / min_len >= 0.8
 
     def test_metrics_populated(self, whisper, tone):
