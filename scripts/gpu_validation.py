@@ -492,6 +492,8 @@ def check_voice_turn(llm_runner, transcript: str):
     if not result.speech or not result.speech.chunks:
         raise AssertionError("no audio chunks produced")
     m = result.metrics
+    if not m.llm_streaming or m.first_token_is_prefill_proxy:
+        raise AssertionError("LLMRunner.stream() was not used; first-token time is a proxy")
     return {
         "sentences": len(result.speech.sentences), "chunks": len(result.speech.chunks),
         "audio_bytes": result.speech.total_bytes,
@@ -499,7 +501,9 @@ def check_voice_turn(llm_runner, transcript: str):
         "final_transcript_to_first_llm_token_ms": m.final_transcript_to_first_llm_token_ms,
         "first_llm_token_to_playback_start_ms": m.first_llm_token_to_playback_start_ms,
         "response_latency_ms": m.response_latency_ms,
-        "first_token_is_prefill_proxy": m.first_token_is_prefill_proxy,
+        "llm_total_ms": m.llm_total_ms, "llm_generated_tokens": m.llm_generated_tokens,
+        "total_turn_ms": m.total_turn_ms,
+        "llm_streaming": m.llm_streaming,
         "response": result.response, "turn": result.as_dict(),
     }
 
@@ -537,6 +541,8 @@ def check_barge_in(llm_runner, transcript: str):
     speech = result.speech
     return {
         "cancelled_after_chunk": fired["at_chunk"],
+        "llm_stopped_by_barge_in": result.metrics.llm_stopped_by_barge_in,
+        "llm_generated_tokens": result.metrics.llm_generated_tokens,
         "sentences_planned": len(speech.sentences) if speech else None,
         "chunks_synthesised": len(speech.chunks) if speech else None,
         "playback_state": result.playback.state.value if result.playback else None,

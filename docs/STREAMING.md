@@ -275,19 +275,29 @@ quiet a while. Halving `min_silence_ms` halves that segment and doubles the rate
 of cutting people off. It is a tuning decision, not a bug, and it should be
 visible in the number.
 
+### The turn is a pipeline
+
+`LLMRunner.stream()` yields text deltas from the same decode loop as
+`generate()` (deltas are cut from the running decode of all tokens so a
+Devanagari matra never arrives detached from its consonant). The turn feeds
+deltas into a `SentenceBuffer`; each complete sentence goes to TTS and
+playback while the LLM is still producing the next. `should_stop` is threaded
+from playback → synthesis → the decode loop, so a barge-in stops generating
+tokens nobody will hear (`llm_stopped_by_barge_in`).
+
 ### Measurement honesty
 
-`LLMRunner.generate()` is **not** a streaming generator — it returns the whole
-response, and from outside there is no way to observe when the first token
-appeared. Two cases, and the turn records which applied:
+- Backend exposes `stream()` → first-token time measured at the first yielded
+  piece. `llm_streaming=True`. This is now the normal case.
+- Backend only has `generate()` → the first-token instant is taken as
+  `llm_start + prefill_ms` and `first_token_is_prefill_proxy=True` is set. The
+  decode time then lands in `first_llm_token_to_playback_start_ms`, where the
+  user actually waits through it.
 
-- Backend exposes `stream()` → first-token time measured directly at the first
-  yielded piece. `llm_streaming=True`.
-- Backend does not → falls back to the runner's internally measured
-  `metrics.prefill_ms`, since prefill completion is when the first token
-  exists. `first_token_is_prefill_proxy=True` is set so nobody later reads it
-  as a wall-clock measurement. It excludes Python-side overhead between
-  `generate()` returning and the caller seeing it.
+An earlier version stamped "first token" *after* `generate()` returned, so
+`response_latency_ms` silently excluded the whole LLM decode: the 291 ms
+quoted from the first sweep was really ~2.2 s. Numbers from before
+2026-09-21 for that field are not comparable.
 
 **Any field that could not be measured is `None`, never `0.0`.** A zero gets
 averaged into a benchmark; a `None` forces the question.
@@ -328,12 +338,13 @@ session = StreamingSession(runner, StreamingConfig(language="hi"))
 | Playback lifecycle and barge-in | Production logic; **needs a real `AudioSink`** — `BufferSink` writes to memory |
 | Sentence splitting | Production, intentionally heuristic |
 | edge-tts chunk streaming | Real streaming, but a **network service** |
-| LLM first-token timing | **Proxy** unless the backend exposes `stream()` |
+| LLM first-token timing | Measured; `LLMRunner.stream()` is real token streaming |
 | `scripts/streaming_demo.py` | Entirely simulated — fakes throughout |
 
 The gaps that matter most, in order: a real `AudioSink` for actual audio output,
-a streaming LLM backend to replace the prefill proxy, and a local TTS engine to
-remove the network round trip from the critical path.
+a local TTS engine to remove the network round trip from the critical path, and
+turn-taking that does not finalise on every pause (16% of read-speech clips
+split; see `docs/EXPERIMENTS.md`).
 
 ### Measuring the streaming penalty
 

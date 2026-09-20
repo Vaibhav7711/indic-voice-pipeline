@@ -524,3 +524,259 @@ class TestLazySynthesis:
         assert result.speech is not None
         assert len(result.speech.chunks) == 1
         assert result.speech.total_ms >= 0
+
+
+# ---------------------------------------------------------------------------
+# Streaming LLM → sentence buffer → TTS pipelining
+# ---------------------------------------------------------------------------
+
+
+class _Log:
+    """Shared event log so tests can assert interleaving order."""
+
+    def __init__(self):
+        self.events: list[str] = []
+
+
+class _StreamingLLM:
+    """Yields deltas of two sentences; honours should_stop; logs each piece."""
+
+    def __init__(self, log: _Log, pieces=None):
+        self.log = log
+        self.pieces = pieces or ["पहला ", "वाक्य ", "है। ", "दूसरा ", "वाक्य ", "है।"]
+        self.last_metrics = None
+
+    def stream(self, prompt, *, max_new_tokens=128, should_stop=None):
+        from types import SimpleNamespace
+
+        n = 0
+        stopped = False
+        try:
+            for piece in self.pieces:
+                self.log.events.append(f"llm:{piece.strip()}")
+                yield piece
+                n += 1
+                if should_stop is not None and should_stop():
+                    stopped = True
+                    break
+        finally:
+            # Like LLMRunner: metrics are recorded even if the consumer
+            # stops iterating (the turn closes us on barge-in).
+            self.last_metrics = SimpleNamespace(stopped_by_caller=stopped, generated_tokens=n)
+
+
+class _LoggingTTS:
+    streaming = True
+
+    def __init__(self, log: _Log, chunks_per_sentence: int = 2):
+        self.log = log
+        self.chunks_per_sentence = chunks_per_sentence
+        self.requested: list[str] = []
+
+    def stream(self, text):
+        self.requested.append(text)
+        self.log.events.append(f"tts:{text}")
+        for _ in range(self.chunks_per_sentence):
+            yield b"\x01" * 32
+
+
+class TestStreamingPipeline:
+    def test_first_sentence_is_synthesised_before_llm_finishes(self):
+        from agent import BufferSink, VoiceTurn
+
+        log = _Log()
+        llm, tts = _StreamingLLM(log), _LoggingTTS(log)
+        result = VoiceTurn(llm, tts).run("नमस्ते", sink=BufferSink())
+
+        assert result.state.value == "completed"
+        assert result.response == "पहला वाक्य है। दूसरा वाक्य है।"
+        assert tts.requested == ["पहला वाक्य है।", "दूसरा वाक्य है।"]
+        first_tts = log.events.index("tts:पहला वाक्य है।")
+        last_llm = max(i for i, e in enumerate(log.events) if e.startswith("llm:"))
+        assert first_tts < last_llm, "TTS for sentence 1 must start before the LLM is done"
+        assert result.metrics.llm_streaming is True
+        assert result.metrics.first_token_is_prefill_proxy is False
+        assert result.metrics.final_transcript_to_first_llm_token_ms is not None
+        assert result.metrics.llm_generated_tokens == 6
+        assert len(result.speech.chunks) == 4
+
+    def test_barge_in_stops_llm_decode_and_later_sentences(self):
+        from agent import BufferSink, VoiceTurn
+
+        log = _Log()
+        llm, tts = _StreamingLLM(log), _LoggingTTS(log)
+        turn = VoiceTurn(llm, tts)
+        sink = BufferSink()
+        original = sink.write
+
+        def write(chunk):
+            original(chunk)
+            turn.interrupt("test")
+
+        sink.write = write
+        result = turn.run("नमस्ते", sink=sink)
+
+        assert result.state.value == "interrupted"
+        assert tts.requested == ["पहला वाक्य है।"]
+        assert result.metrics.llm_stopped_by_barge_in is True
+        assert result.metrics.llm_generated_tokens < 6, "decode must stop on barge-in"
+        assert result.response.startswith("पहला वाक्य है।")
+        assert not result.response.endswith("दूसरा वाक्य है।")
+
+    def test_sentence_level_off_synthesises_whole_response_once(self):
+        from agent import BufferSink, VoiceTurn
+
+        log = _Log()
+        llm, tts = _StreamingLLM(log), _LoggingTTS(log)
+        result = VoiceTurn(llm, tts, split_into_sentences=False).run("x", sink=BufferSink())
+        assert tts.requested == ["पहला वाक्य है। दूसरा वाक्य है।"]
+        assert result.state.value == "completed"
+
+    def test_llm_error_after_some_output_is_reported_not_fatal(self):
+        from agent import BufferSink, VoiceTurn
+
+        log = _Log()
+
+        class Exploding(_StreamingLLM):
+            def stream(self, prompt, **kw):
+                yield "पहला वाक्य है। "
+                raise RuntimeError("cuda gone")
+
+        result = VoiceTurn(Exploding(log), _LoggingTTS(log)).run("x", sink=BufferSink())
+        assert result.state.value == "completed"
+        assert "cuda gone" in (result.error or "")
+        assert result.response == "पहला वाक्य है।"
+
+    def test_llm_error_before_any_output_fails_the_turn(self):
+        from agent import BufferSink, VoiceTurn
+
+        log = _Log()
+
+        class Dead(_StreamingLLM):
+            def stream(self, prompt, **kw):
+                raise RuntimeError("no model")
+                yield  # pragma: no cover
+
+        result = VoiceTurn(Dead(log), _LoggingTTS(log)).run("x", sink=BufferSink())
+        assert result.state.value == "failed"
+        assert "no model" in result.error
+
+
+class TestLatencyAccounting:
+    def test_non_streaming_backend_charges_decode_time_to_playback_segment(self):
+        """With generate()-only backends the first-token instant is the
+        prefill proxy, so the decode time must land in
+        first_llm_token_to_playback_start_ms, not vanish."""
+        from types import SimpleNamespace
+
+        from agent import BufferSink, VoiceTurn
+
+        clock = {"now": 0.0}
+
+        def now():
+            return clock["now"]
+
+        class SlowGenerate:
+            def generate(self, prompt, **kw):
+                clock["now"] += 1000.0          # 1 s: 50 ms prefill + 950 ms decode
+                return SimpleNamespace(
+                    text="उत्तर यहाँ है।",
+                    metrics=SimpleNamespace(prefill_ms=50.0, generated_tokens=20),
+                )
+
+        class InstantTTS:
+            streaming = True
+
+            def stream(self, text):
+                yield b"\x01"
+
+        result = VoiceTurn(SlowGenerate(), InstantTTS(), clock=now).run(
+            "x", sink=BufferSink(), speech_end_to_transcript_ms=300.0,
+        )
+        m = result.metrics
+        assert m.first_token_is_prefill_proxy is True
+        assert m.final_transcript_to_first_llm_token_ms == 50.0
+        assert m.first_llm_token_to_playback_start_ms == 950.0
+        assert m.response_latency_ms == 300.0 + 50.0 + 950.0
+
+    def test_streaming_backend_measures_first_token_directly(self):
+        from agent import BufferSink, VoiceTurn
+
+        clock = {"now": 0.0}
+
+        def now():
+            return clock["now"]
+
+        class TickingLLM:
+            def stream(self, prompt, **kw):
+                clock["now"] += 80.0            # prefill
+                yield "पहला "
+                clock["now"] += 40.0
+                yield "वाक्य "
+                clock["now"] += 40.0
+                yield "है। "
+                clock["now"] += 400.0           # second sentence, after playback began
+                yield "दूसरा वाक्य है।"
+
+        class TickingTTS:
+            streaming = True
+
+            def stream(self, text):
+                clock["now"] += 200.0           # network round trip
+                yield b"\x01"
+
+        result = VoiceTurn(TickingLLM(), TickingTTS(), clock=now).run("x", sink=BufferSink())
+        m = result.metrics
+        assert m.llm_streaming is True
+        assert m.final_transcript_to_first_llm_token_ms == 80.0
+        # first token → end of sentence 1 (80 ms) → first TTS chunk (200 ms)
+        assert m.first_llm_token_to_playback_start_ms == 280.0
+        assert result.state.value == "completed"
+
+
+# ---------------------------------------------------------------------------
+# SentenceBuffer
+# ---------------------------------------------------------------------------
+
+
+class TestSentenceBuffer:
+    def test_emits_on_danda_immediately_and_on_ascii_period_after_space(self):
+        from tts.streaming import SentenceBuffer
+
+        b = SentenceBuffer(min_chars=4)
+        assert b.feed("पहला वाक्य") == []
+        assert b.feed(" है।") == ["पहला वाक्य है।"]           # danda: no wait
+        assert b.feed(" Second one.") == []                  # '.' needs a following space
+        assert b.feed(" Third") == ["Second one."]
+        assert b.flush() == ["Third"]
+
+    def test_decimal_point_does_not_split(self):
+        from tts.streaming import SentenceBuffer
+
+        b = SentenceBuffer(min_chars=4)
+        assert b.feed("कीमत 3.5 लाख है। ") == ["कीमत 3.5 लाख है।"]
+
+    def test_newline_is_a_hard_break(self):
+        from tts.streaming import SentenceBuffer
+
+        b = SentenceBuffer(min_chars=4)
+        assert b.feed("पहली पंक्ति\nदूसरी") == ["पहली पंक्ति"]
+        assert b.flush() == ["दूसरी"]
+
+    def test_short_fragments_merge_forward_like_split_sentences(self):
+        from tts.streaming import SentenceBuffer, split_sentences
+
+        text = "हाँ। मैं ठीक हूँ। आप कैसे हैं?"
+        b = SentenceBuffer()
+        out = []
+        for ch in text:                                  # one character at a time
+            out.extend(b.feed(ch))
+        out.extend(b.flush())
+        assert out == split_sentences(text)
+
+    def test_disabled_buffer_emits_only_on_flush(self):
+        from tts.streaming import SentenceBuffer
+
+        b = SentenceBuffer(enabled=False)
+        assert b.feed("एक। दो। ") == []
+        assert b.flush() == ["एक। दो।"]

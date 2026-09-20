@@ -40,10 +40,12 @@ from typing import Protocol
 
 __all__ = [
     "split_sentences",
+    "SentenceBuffer",
     "AudioChunk",
     "SpeechStream",
     "StreamingSynthesizer",
     "EdgeStreamingSynthesizer",
+    "iter_sentence",
     "iter_synthesis",
     "synthesize_stream",
 ]
@@ -97,6 +99,83 @@ def split_sentences(text: str, min_chars: int = MIN_SENTENCE_CHARS) -> list[str]
         else:
             merged.append(pending)
     return merged
+
+
+#: A sentence is complete at one of these even without trailing whitespace.
+#: ASCII "." is excluded: "3.5" or "e.g." would split mid-token.
+_HARD_TERMINATORS = "।॥!?"
+_ANY_TERMINATOR_THEN_SPACE = re.compile(r"[।॥.!?…]+\s")
+
+
+class SentenceBuffer:
+    """Turn a stream of text deltas into complete sentences, incrementally.
+
+    ``feed`` returns sentences that are complete *so far*; ``flush`` returns
+    whatever remains. Same merge-forward rule as :func:`split_sentences` so a
+    short fragment is not synthesised alone. With ``enabled=False`` nothing
+    is emitted until ``flush`` — the whole response as one unit.
+
+    LLM analogy: this is the boundary between token streaming and the unit
+    the next stage can act on. A token is not actionable; a sentence is.
+    """
+
+    def __init__(self, min_chars: int = MIN_SENTENCE_CHARS, *, enabled: bool = True):
+        self.min_chars = min_chars
+        self.enabled = enabled
+        self._buffer = ""
+        self._pending = ""
+        self.emitted: list[str] = []
+
+    def feed(self, delta: str) -> list[str]:
+        self._buffer += delta
+        if not self.enabled:
+            return []
+        out: list[str] = []
+        while True:
+            cut = self._complete_prefix_end()
+            if cut is None:
+                break
+            piece = self._buffer[:cut].strip()
+            self._buffer = self._buffer[cut:]
+            if piece:
+                out.extend(self._merge(piece))
+        return out
+
+    def flush(self) -> list[str]:
+        out: list[str] = []
+        tail = self._buffer.strip()
+        self._buffer = ""
+        if tail:
+            out.extend(self._merge(tail))
+        if self._pending:
+            if out:
+                out[-1] = f"{out[-1]} {self._pending}".strip()
+            else:
+                out.append(self._pending)
+            self._pending = ""
+        self.emitted.extend(out)
+        return out
+
+    # -- internals --------------------------------------------------------
+
+    def _complete_prefix_end(self) -> int | None:
+        """Index just past the first complete sentence, or None."""
+        newline = self._buffer.find("\n")
+        m = _ANY_TERMINATOR_THEN_SPACE.search(self._buffer)
+        candidates = [i for i in (newline + 1 if newline >= 0 else None,
+                                  m.end() if m else None) if i is not None]
+        if self._buffer and self._buffer[-1] in _HARD_TERMINATORS:
+            candidates.append(len(self._buffer))
+        return min(candidates) if candidates else None
+
+    def _merge(self, piece: str) -> list[str]:
+        candidate = f"{self._pending} {piece}".strip() if self._pending else piece
+        if len(candidate) < self.min_chars:
+            self._pending = candidate
+            return []
+        self._pending = ""
+        self.emitted.append(candidate)
+        return [candidate]
 
 
 @dataclass(frozen=True)
@@ -227,6 +306,35 @@ class EdgeStreamingSynthesizer:
             thread.join(timeout=0.1)
 
 
+def iter_sentence(
+    synthesizer: StreamingSynthesizer,
+    sentence: str,
+    sentence_index: int,
+    stream: SpeechStream,
+    *,
+    start_ns: int,
+    should_stop=None,
+    on_chunk=None,
+) -> Iterator[AudioChunk]:
+    """Synthesise one sentence, appending its chunks to ``stream``.
+
+    Building block for :func:`iter_synthesis` and for the agent turn, which
+    feeds sentences as the LLM produces them rather than from a finished
+    response. Exceptions propagate; callers decide how to record them.
+    """
+    for data in synthesizer.stream(sentence):
+        if should_stop is not None and should_stop():
+            return
+        elapsed = (perf_counter_ns() - start_ns) / 1_000_000
+        chunk = AudioChunk(data, len(stream.chunks), sentence_index, elapsed)
+        if stream.first_chunk_ms is None:
+            stream.first_chunk_ms = elapsed
+        stream.chunks.append(chunk)
+        if on_chunk is not None:
+            on_chunk(chunk)
+        yield chunk
+
+
 def iter_synthesis(
     synthesizer: StreamingSynthesizer,
     text: str,
@@ -254,23 +362,14 @@ def iter_synthesis(
     stream.first_chunk_ms = None
     stream.error = None
 
-    index = 0
     try:
         for sentence_index, sentence in enumerate(stream.sentences):
             if should_stop is not None and should_stop():
                 break
-            for data in synthesizer.stream(sentence):
-                if should_stop is not None and should_stop():
-                    break
-                elapsed = (perf_counter_ns() - start) / 1_000_000
-                chunk = AudioChunk(data, index, sentence_index, elapsed)
-                index += 1
-                if stream.first_chunk_ms is None:
-                    stream.first_chunk_ms = elapsed
-                stream.chunks.append(chunk)
-                if on_chunk is not None:
-                    on_chunk(chunk)
-                yield chunk
+            yield from iter_sentence(
+                synthesizer, sentence, sentence_index, stream,
+                start_ns=start, should_stop=should_stop, on_chunk=on_chunk,
+            )
     except Exception as exc:  # noqa: BLE001 - surfaced as state, not a crash
         stream.error = f"{type(exc).__name__}: {exc}"
     finally:

@@ -389,16 +389,15 @@ ASR decode and LLM decode are each ~45% of the turn; both are per-token
 sequential cost, which is why the agent path streams sentences to TTS rather
 than waiting for the whole answer.
 
-### Voice turn (final transcript → audio playing), same run
+### Voice turn (final transcript → audio playing)
 
-| Segment | Time |
-| --- | ---: |
-| Final transcript → first LLM token (prefill proxy) | 86 ms |
-| First LLM token → playback start (edge-tts first chunk) | 204 ms |
-| **Response latency, excluding endpoint silence** | **291 ms** |
-
-The endpointer's `min_silence_ms` is added on top of this in a live session;
-see `docs/STREAMING.md` §5.
+_To be re-measured._ The first sweep reported 291 ms, but that accounting
+stamped "first token" after the whole response had been generated and so
+omitted ~1.9 s of LLM decode; the honest figure for that turn was ~2.2 s. The
+turn now streams the LLM and starts TTS after the first sentence, and the
+next sweep will report `response_latency_ms` measured end to end. The
+endpointer's `min_silence_ms` is added on top in a live session; see
+`docs/STREAMING.md` §5.
 
 ### Streaming vs offline (100 seeded FLEURS-hi test clips)
 

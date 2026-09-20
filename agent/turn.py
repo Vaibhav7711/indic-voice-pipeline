@@ -27,19 +27,30 @@ only by splitting them can you tell which component to fix.
 ``total_turn_ms``
     End to end. Not the sum of the above when stages overlap.
 
+Pipelining
+----------
+LLM deltas feed a :class:`tts.streaming.SentenceBuffer`; each complete
+sentence is synthesised and played while the LLM is still producing the next
+one. So ``first_llm_token_to_playback_start_ms`` covers the first *sentence*
+of decode plus the first TTS round trip, not the whole response. A barge-in
+cancels playback, which stops synthesis, which stops the LLM decode loop
+(``should_stop`` is threaded all the way back) — tokens that would never be
+heard are never generated.
+
 Measurement honesty
 -------------------
-``LLMRunner.generate()` is **not** a streaming generator — it returns the whole
-response. From outside, there is no way to observe when the first token
-appeared. Two cases, and the turn records which one applied:
+Two kinds of backend, and the turn records which applied:
 
-* Backend exposes ``stream()`` → first-token time is measured directly at the
-  first yielded piece. ``llm_streaming=True``.
-* Backend does not → the turn falls back to the runner's internally measured
-  ``metrics.prefill_ms``, since prefill completion is when the first token
-  exists. ``first_token_is_prefill_proxy=True`` is set so no one later reads it
-  as a wall-clock measurement. It excludes the Python-side overhead between
-  ``generate()`` returning and the caller seeing it.
+* Backend exposes ``stream()`` → first-token time is measured at the first
+  yielded piece. ``llm_streaming=True``. ``llm.runner.LLMRunner`` does.
+* Backend only has ``generate()`` → the whole response arrives at once. The
+  first-token instant is taken as ``llm_start + metrics.prefill_ms`` (prefill
+  completion is when the first token exists) and
+  ``first_token_is_prefill_proxy=True`` is set. The decode time then lands in
+  ``first_llm_token_to_playback_start_ms``, where it belongs: the user is
+  waiting through it. (An earlier version stamped "first token" *after*
+  ``generate()`` returned, which hid the entire decode from
+  ``response_latency_ms``.)
 
 Any field that could not be measured is ``None``, never zero. A zero would be
 averaged into a benchmark; a ``None`` forces the question.
@@ -55,7 +66,7 @@ from typing import Any, Protocol
 
 from agent.playback import AudioSink, BufferSink, PlaybackResult, PlaybackSession
 from llm.prompting import build_chat_prompt
-from tts.streaming import SpeechStream, iter_synthesis
+from tts.streaming import SentenceBuffer, SpeechStream, iter_sentence
 
 __all__ = [
     "TurnState",
@@ -105,6 +116,9 @@ class TurnMetrics:
     tts_streaming: bool = False
     tts_sentence_level: bool = False
     barge_in: bool = False
+    #: LLM decode was cut short by the barge-in (streaming backends only).
+    llm_stopped_by_barge_in: bool = False
+    llm_generated_tokens: int | None = None
 
     @property
     def response_latency_ms(self) -> float | None:
@@ -142,6 +156,8 @@ class TurnMetrics:
             "tts_streaming": self.tts_streaming,
             "tts_sentence_level": self.tts_sentence_level,
             "barge_in": self.barge_in,
+            "llm_stopped_by_barge_in": self.llm_stopped_by_barge_in,
+            "llm_generated_tokens": self.llm_generated_tokens,
         }
 
 
@@ -221,36 +237,62 @@ class VoiceTurn:
 
     # -- LLM --------------------------------------------------------------
 
-    def _run_llm(self, prompt: str, metrics: TurnMetrics) -> str:
+    def _llm_deltas(self, prompt: str, metrics: TurnMetrics, playback: PlaybackSession,
+                    marks: dict):
+        """Yield response text pieces, stamping ``marks["first_token_at"]``."""
         start = self._clock()
+        marks["llm_start"] = start
 
         streamer = getattr(self.generator, "stream", None)
         if callable(streamer):
             metrics.llm_streaming = True
-            pieces: list[str] = []
-            for piece in streamer(prompt, max_new_tokens=self.llm_max_tokens):
-                if not pieces:
-                    metrics.final_transcript_to_first_llm_token_ms = (
-                        self._clock() - start
-                    )
-                pieces.append(piece)
-            metrics.llm_total_ms = self._clock() - start
-            return "".join(pieces)
+            try:
+                pieces = streamer(prompt, max_new_tokens=self.llm_max_tokens,
+                                  should_stop=playback.should_stop)
+            except TypeError:  # backend without should_stop support
+                pieces = streamer(prompt, max_new_tokens=self.llm_max_tokens)
+            finished = False
+            try:
+                for piece in pieces:
+                    if marks.get("first_token_at") is None:
+                        marks["first_token_at"] = self._clock()
+                        metrics.final_transcript_to_first_llm_token_ms = (
+                            marks["first_token_at"] - start
+                        )
+                    yield piece
+                finished = True
+            finally:
+                # Runs on natural completion *and* when the consumer stops
+                # early (barge-in closes this generator). Close the backend's
+                # generator now so its own bookkeeping runs before we read it.
+                close = getattr(pieces, "close", None)
+                if callable(close):
+                    close()
+                metrics.llm_total_ms = self._clock() - start
+                last = getattr(self.generator, "last_metrics", None)
+                metrics.llm_stopped_by_barge_in = (
+                    bool(getattr(last, "stopped_by_caller", False))
+                    or (not finished and playback.should_stop())
+                )
+                metrics.llm_generated_tokens = getattr(last, "generated_tokens", None)
+            return
 
         result = self.generator.generate(prompt, max_new_tokens=self.llm_max_tokens)
         metrics.llm_total_ms = self._clock() - start
-
-        # Non-streaming backend: prefill completion is when the first token
-        # exists, and only the runner can see it. Flagged as a proxy.
         prefill = getattr(getattr(result, "metrics", None), "prefill_ms", None)
+        metrics.first_token_is_prefill_proxy = True
         if prefill is not None:
             metrics.final_transcript_to_first_llm_token_ms = float(prefill)
-            metrics.first_token_is_prefill_proxy = True
+            marks["first_token_at"] = start + float(prefill)
         else:
             metrics.final_transcript_to_first_llm_token_ms = metrics.llm_total_ms
-            metrics.first_token_is_prefill_proxy = True
-
-        return getattr(result, "text", "") or ""
+            marks["first_token_at"] = self._clock()
+        metrics.llm_generated_tokens = getattr(
+            getattr(result, "metrics", None), "generated_tokens", None,
+        )
+        text = getattr(result, "text", "") or ""
+        if text:
+            yield text
 
     # -- turn -------------------------------------------------------------
 
@@ -279,66 +321,78 @@ class VoiceTurn:
             return result
 
         self.state = TurnState.THINKING
-        try:
-            response = self._run_llm(self.build_prompt(transcript), metrics)
-        except Exception as exc:  # noqa: BLE001
-            self.state = TurnState.FAILED
-            result.state = TurnState.FAILED
-            result.error = f"{type(exc).__name__}: {exc}"
-            metrics.total_turn_ms = self._clock() - turn_start
-            result.metrics = metrics
-            return result
-
-        result.response = response
-        first_token_at = self._clock()
-
-        self.state = TurnState.SPEAKING
         playback = PlaybackSession(
             sink or self.sink_factory(), playback_id=turn_id, clock=self._clock
         )
         self.playback = playback
-
-        # Synthesis is driven lazily by playback: iter_synthesis yields each
-        # chunk as the backend produces it, so the first sentence plays while
-        # later ones are still being synthesised, and a barge-in during the
-        # first sentence stops the remaining sentences from being synthesised
-        # at all rather than being generated and thrown away.
-        speech = SpeechStream()
+        speech = SpeechStream(streaming=metrics.tts_streaming)
+        marks: dict = {}
+        response_parts: list[str] = []
+        errors: dict = {}
+        synth_start_ns = perf_counter_ns()
 
         def produce():
-            for chunk in iter_synthesis(
-                self.synthesizer,
-                response,
-                speech,
-                split=self.split_into_sentences,
-                should_stop=playback.should_stop,
-            ):
-                yield chunk.data
+            """Audio chunks, driven by LLM deltas through the sentence buffer."""
+            buffer = SentenceBuffer(enabled=self.split_into_sentences)
+            prompt = self.build_prompt(transcript)
+            try:
+                for piece in self._llm_deltas(prompt, metrics, playback, marks):
+                    response_parts.append(piece)
+                    for sentence in buffer.feed(piece):
+                        yield from synth(sentence)
+                    if playback.should_stop():
+                        return
+                for sentence in buffer.flush():
+                    yield from synth(sentence)
+            except Exception as exc:  # noqa: BLE001 - recorded on the result
+                errors.setdefault("llm", f"{type(exc).__name__}: {exc}")
+            finally:
+                speech.sentences = list(buffer.emitted)
+                speech.total_ms = (perf_counter_ns() - synth_start_ns) / 1_000_000
+
+        synthesised = {"count": 0}
+
+        def synth(sentence: str):
+            self.state = TurnState.SPEAKING
+            index = synthesised["count"]
+            synthesised["count"] += 1
+            try:
+                for chunk in iter_sentence(
+                    self.synthesizer, sentence, index, speech,
+                    start_ns=synth_start_ns, should_stop=playback.should_stop,
+                ):
+                    yield chunk.data
+            except Exception as exc:  # noqa: BLE001 - surfaced as state, not a crash
+                speech.error = f"{type(exc).__name__}: {exc}"
+                errors.setdefault("tts", speech.error)
 
         playback_start = self._clock()
         playback_result = playback.play(produce())
 
+        result.response = "".join(response_parts).strip()
         result.speech = speech
         result.playback = playback_result
         metrics.tts_first_chunk_ms = speech.first_chunk_ms
         metrics.playback_first_audio_ms = playback_result.first_audio_ms
 
-        if playback_result.first_audio_ms is not None:
-            # first_audio_ms is relative to when play() began, so the segment
-            # from first token is the gap before play() plus that offset.
-            metrics.first_llm_token_to_playback_start_ms = max(
-                0.0,
-                (playback_start - first_token_at) + playback_result.first_audio_ms,
-            )
+        first_token_at = marks.get("first_token_at")
+        if playback_result.first_audio_ms is not None and first_token_at is not None:
+            first_audio_at = playback_start + playback_result.first_audio_ms
+            metrics.first_llm_token_to_playback_start_ms = max(0.0, first_audio_at - first_token_at)
         metrics.barge_in = playback_result.interrupted
 
-        if playback_result.state.value == "failed":
+        if "llm" in errors and not response_parts:
+            self.state = TurnState.FAILED
+            result.error = errors["llm"]
+        elif playback_result.state.value == "failed":
             self.state = TurnState.FAILED
             result.error = playback_result.error
         elif playback_result.interrupted:
             self.state = TurnState.INTERRUPTED
         else:
             self.state = TurnState.COMPLETED
+            if errors:
+                result.error = "; ".join(f"{k}: {v}" for k, v in errors.items())
 
         result.state = self.state
         metrics.total_turn_ms = self._clock() - turn_start
