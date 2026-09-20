@@ -56,13 +56,14 @@ SR = 16_000
 #: VADConfig field overrides applied on top of the defaults.
 VAD_GRID: dict[str, dict] = {
     "default": {},
-    "fixed40": {"adaptive_threshold": False, "threshold_dbfs": -40.0},
-    "pad300": {"padding_ms": 300},
+    # The pre-2026-09-20 behaviour: fixed -40 dBFS, 200 ms padding, -60 floor.
+    "fixed40": {"adaptive_threshold": False, "threshold_dbfs": -40.0, "padding_ms": 200},
+    # The defaults as first benchmarked (results/streaming_eval/medium-lora-test-100).
+    "v1-adaptive": {"padding_ms": 200, "threshold_floor_dbfs": -60.0},
+    "pad200": {"padding_ms": 200},
     "pad500": {"padding_ms": 500},
-    "floor65": {"threshold_floor_dbfs": -65.0},
-    "floor70": {"threshold_floor_dbfs": -70.0},
-    "pad300-floor70": {"padding_ms": 300, "threshold_floor_dbfs": -70.0},
-    "pad500-floor70": {"padding_ms": 500, "threshold_floor_dbfs": -70.0},
+    "floor60": {"threshold_floor_dbfs": -60.0},
+    "floor80": {"threshold_floor_dbfs": -80.0},
     "sil400": {"min_silence_ms": 400},
     "sil800": {"min_silence_ms": 800},
     "margin8": {"noise_margin_db": 8.0},

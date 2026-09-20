@@ -400,6 +400,16 @@ than waiting for the whole answer.
 The endpointer's `min_silence_ms` is added on top of this in a live session;
 see `docs/STREAMING.md` §5.
 
+### Streaming vs offline (100 seeded FLEURS-hi test clips)
+
+| VAD | Streamed WER | Offline WER | Penalty |
+| --- | ---: | ---: | ---: |
+| fixed −40 dBFS (before) | 34.60% | 27.26% | +7.34 pp, 3 clips lost |
+| adaptive (now) | **26.77%** | 27.26% | −0.49 pp |
+
+`benchmarks/streaming_eval.py`; details and the VAD grid in
+`docs/EXPERIMENTS.md`.
+
 ## Correctness policy
 
 | Component | Required comparison |

@@ -56,8 +56,8 @@ def test_quiet_speech_below_fixed_threshold_is_kept_with_adaptive_rule():
     adaptive = detect_speech(audio, sr, VADConfig())
     assert fixed == []
     assert len(adaptive) == 1
-    assert abs(adaptive[0].start_seconds - 0.8) < 0.05      # 1.0 s minus padding
-    assert abs(adaptive[0].end_seconds - 3.2) < 0.05
+    assert abs(adaptive[0].start_seconds - 0.7) < 0.05      # 1.0 s minus padding
+    assert abs(adaptive[0].end_seconds - 3.3) < 0.05
 
 
 def test_adaptive_threshold_never_exceeds_fixed_ceiling():
@@ -74,7 +74,7 @@ def test_adaptive_threshold_has_a_floor_for_digital_silence():
     thr = AdaptiveThreshold(VADConfig())
     for _ in range(50):
         level = thr.update(-200.0)
-    assert level == -60.0
+    assert level == VADConfig().threshold_floor_dbfs == -70.0
     assert thr.noise_floor_dbfs == -200.0
 
 

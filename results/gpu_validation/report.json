@@ -1,0 +1,1547 @@
+{
+  "context": {
+    "argv": [
+      "scripts/gpu_validation.py",
+      "--adapter",
+      "Hugme6969/whisper-medium-hindi-lora",
+      "--out-dir",
+      "results/gpu_validation"
+    ],
+    "gpu": "Tesla T4",
+    "vram_gib": 14.56,
+    "torch": "2.11.0+cu128",
+    "transformers": "5.16.1",
+    "git_commit": "21ebce752fa78f8c6dc20cb58b115d21aba449be",
+    "python": "3.13.15"
+  },
+  "checks": [
+    {
+      "name": "environment",
+      "status": "pass",
+      "detail": {
+        "gpu": "Tesla T4",
+        "vram_gib": 14.56,
+        "torch": "2.11.0+cu128",
+        "transformers": "5.16.1",
+        "git_commit": "21ebce752fa78f8c6dc20cb58b115d21aba449be",
+        "python": "3.13.15"
+      },
+      "error": null,
+      "seconds": 4.608931220999921
+    },
+    {
+      "name": "gpu_unit_tests",
+      "status": "pass",
+      "detail": {
+        "summary": "........                                                                 [100%]"
+      },
+      "error": null,
+      "seconds": 47.05836135499999
+    },
+    {
+      "name": "fetch_fleurs_clips",
+      "status": "pass",
+      "detail": {
+        "hi_clips": 5,
+        "en_clips": 2,
+        "hi_seconds": 55.9
+      },
+      "error": null,
+      "seconds": 14.099963021000121
+    },
+    {
+      "name": "load_whisper_with_hub_adapter",
+      "status": "pass",
+      "detail": {
+        "model": "openai/whisper-medium",
+        "adapter_dir": "/root/.cache/huggingface/hub/models--Hugme6969--whisper-medium-hindi-lora/snapshots/953eb14d6de983ad159491e76742dbfba9f13acb"
+      },
+      "error": null,
+      "seconds": 9.384160528999928
+    },
+    {
+      "name": "served_model_matches_generate",
+      "status": "pass",
+      "detail": {
+        "clips": 3,
+        "worst_prefix_match": 1.0,
+        "all_exact": true,
+        "per_clip": [
+          {
+            "clip": "hi_in_test_7.wav",
+            "explicit_tokens": 85,
+            "generate_tokens": 85,
+            "prefix_match": 1.0,
+            "exact": true,
+            "explicit_text": "इसे कैमिकल का पीएज कहा जाता है आप लाल गोभी के जूस को इस्तेमाल करके एक संकेतक बना सकते हैं",
+            "generate_text": "इसे कैमिकल का पीएज कहा जाता है आप लाल गोभी के जूस को इस्तेमाल करके एक संकेतक बना सकते हैं"
+          },
+          {
+            "clip": "hi_in_test_42.wav",
+            "explicit_tokens": 111,
+            "generate_tokens": 111,
+            "prefix_match": 1.0,
+            "exact": true,
+            "explicit_text": "महिलाये या अनुश्रंशा की जाती है कि कोई भी महिलायात्री वास्तविक विवाई क्तिति के बावजुद कहती है कि वह विवाइत है",
+            "generate_text": "महिलाये या अनुश्रंशा की जाती है कि कोई भी महिलायात्री वास्तविक विवाई क्तिति के बावजुद कहती है कि वह विवाइत है"
+          },
+          {
+            "clip": "hi_in_test_123.wav",
+            "explicit_tokens": 171,
+            "generate_tokens": 171,
+            "prefix_match": 1.0,
+            "exact": true,
+            "explicit_text": "सड़कों पर ज्यादा धुर्कटना की वजह बहुत ज्यादा कार ओनरशिप है जिससे शरीर में हुई टूटफुट को सुधारने के लिए हेल्थ क्यर में नई तक्नीकों के आविष्कार को बढ़ावा मिला है",
+            "generate_text": "सड़कों पर ज्यादा धुर्कटना की वजह बहुत ज्यादा कार ओनरशिप है जिससे शरीर में हुई टूटफुट को सुधारने के लिए हेल्थ क्यर में नई तक्नीकों के आविष्कार को बढ़ावा मिला है"
+          }
+        ]
+      },
+      "error": null,
+      "seconds": 19.907753284000137
+    },
+    {
+      "name": "asr_quality_on_clips",
+      "status": "pass",
+      "detail": {
+        "mean_wer": 24.628822790113112,
+        "mean_rtf": 0.26370092518048616,
+        "rows": [
+          {
+            "clip": "hi_in_test_7.wav",
+            "seconds": 8.22,
+            "wer": 15.0,
+            "rtf": 0.23762273381995133,
+            "total_ms": 1953.258872,
+            "hypothesis": "इसे कैमिकल का पीएज कहा जाता है आप लाल गोभी के जूस को इस्तेमाल करके एक संकेतक बना सकते हैं",
+            "reference": "इसे केमिकल का ph कहा जाता है आप लाल गोभी के जूस का इस्तेमाल करके एक संकेतक बना सकते हैं"
+          },
+          {
+            "clip": "hi_in_test_42.wav",
+            "seconds": 8.52,
+            "wer": 40.909090909090914,
+            "rtf": 0.3448101600938967,
+            "total_ms": 2937.782564,
+            "hypothesis": "महिलाये या अनुश्रंशा की जाती है कि कोई भी महिलायात्री वास्तविक विवाई क्तिति के बावजुद कहती है कि वह विवाइत है",
+            "reference": "महिलाएं यह अनुशंसा की जाती है कि कोई भी महिला यात्री वास्तविक वैवाहिक स्थिति के बावजूद कहती है कि वह विवाहित है"
+          },
+          {
+            "clip": "hi_in_test_123.wav",
+            "seconds": 15.54,
+            "wer": 25.806451612903224,
+            "rtf": 0.281525375032175,
+            "total_ms": 4374.904328,
+            "hypothesis": "सड़कों पर ज्यादा धुर्कटना की वजह बहुत ज्यादा कार ओनरशिप है जिससे शरीर में हुई टूटफुट को सुधारने के लिए हेल्थ क्यर में नई तक्नीकों के आविष्कार को बढ़ावा मिला है",
+            "reference": "सड़कों पर ज़्यादा दुर्घटना की वजह बहुत ज़्यादा कार ओनरशिप है जिससे शरीर में हुई टूट-फूट को सुधारने के लिए हेल्थकेयर में नई तकनीकों के आविष्कार को बढ़ावा मिला है"
+          },
+          {
+            "clip": "hi_in_test_256.wav",
+            "seconds": 10.2,
+            "wer": 21.428571428571427,
+            "rtf": 0.27835012607843135,
+            "total_ms": 2839.171286,
+            "hypothesis": "परिशर के किनारे ज्यादातर इमारतें फिर से बनाई गई हैं ताकि परिटो को बेहतर ध्रंग से पता चले कि वे मूल रूप में कैसी दिखाई देती थी",
+            "reference": "परिसर के किनारे ज़्यादातर इमारतें फिर से बनाई गई हैं ताकि पर्यटकों को बेहतर ढंग से पता चल सके कि वे मूल रूप में कैसी दिखाई देती थी"
+          },
+          {
+            "clip": "hi_in_test_311.wav",
+            "seconds": 13.44,
+            "wer": 20.0,
+            "rtf": 0.1761962308779762,
+            "total_ms": 2368.077343,
+            "hypothesis": "सावधान रहे कि कपड़े को बहुत गर्म न होने दे जो शिकूडने का आकारण बन सकता है या बहुत गर्म होने पर जल सकता है",
+            "reference": "सावधान रहें कि कपड़े को बहुत गर्म न होने दें जो सिकुड़न का कारण बन सकता है या बहुत गरम होने पर जल सकता है।"
+          }
+        ]
+      },
+      "error": null,
+      "seconds": 14.49393795800006
+    },
+    {
+      "name": "language_detection_base_model",
+      "status": "pass",
+      "detail": {
+        "clips": 4,
+        "mean_detection_ms": 48.84601275,
+        "min_probability": 0.8942435383796692,
+        "wrong": [],
+        "rows": [
+          {
+            "clip": "hi_in_test_7.wav",
+            "expected": "hi",
+            "detected": "hi",
+            "probability": 0.8942435383796692,
+            "detection_ms": 79.289359,
+            "text": "इसे कैमिकल का प्येज कहा जाता है आप लाल गोबी के जॉस को इस्तमाल करके एक संके तक बना सकते हैं"
+          },
+          {
+            "clip": "hi_in_test_42.wav",
+            "expected": "hi",
+            "detected": "hi",
+            "probability": 0.96144700050354,
+            "detection_ms": 25.507163,
+            "text": "अपने अपने अपने अपने अपने अपने अपने अपने अपने अपने अपने अपने अपने अपने अपने अपने अपने अपने अपने अपने अपने अपने अपने अपने अपने अपने अपने अपने अपने अपने अपने अपने अपने अपने अपने अपने अपने अ�"
+          },
+          {
+            "clip": "en_us_test_5.wav",
+            "expected": "en",
+            "detected": "en",
+            "probability": 0.9970222115516663,
+            "detection_ms": 39.775683,
+            "text": "The hospital has followed protocol for infection control including separating the patient from others to prevent possible infection of others."
+          },
+          {
+            "clip": "en_us_test_77.wav",
+            "expected": "en",
+            "detected": "en",
+            "probability": 0.9963830709457397,
+            "detection_ms": 50.811846,
+            "text": "This is called a chemicals pH. You can make an indicator using red cabbage juice."
+          }
+        ]
+      },
+      "error": null,
+      "seconds": 18.781881729999895
+    },
+    {
+      "name": "language_detection_adapter",
+      "status": "warn",
+      "detail": {
+        "unrestricted_wrong": 2,
+        "restricted_wrong": 0,
+        "unrestricted": {
+          "clips": 4,
+          "mean_detection_ms": 24.68761975,
+          "min_probability": 0.6355319023132324,
+          "wrong": [
+            "hi_in_test_7.wav→ca",
+            "hi_in_test_42.wav→ca"
+          ],
+          "rows": [
+            {
+              "clip": "hi_in_test_7.wav",
+              "expected": "hi",
+              "detected": "ca",
+              "probability": 0.6355319023132324,
+              "detection_ms": 26.436425,
+              "text": "इसे कैमिकल का पीएज कहा जाता है आप लाल गोभी के जूस को इस्तेमाल करके एक संकेतक बना सकते हैं"
+            },
+            {
+              "clip": "hi_in_test_42.wav",
+              "expected": "hi",
+              "detected": "ca",
+              "probability": 0.7264750003814697,
+              "detection_ms": 24.072572,
+              "text": "महिलाएए या अनुष्रणशा की जाती है कि कोई भी महिलायात्री वास्तविक विवाई क्तिति के बावजूद कहती है कि वह विवाइत है"
+            },
+            {
+              "clip": "en_us_test_5.wav",
+              "expected": "en",
+              "detected": "en",
+              "probability": 0.9726133346557617,
+              "detection_ms": 24.309696,
+              "text": "The hospital has followed protocol for infection control, including separating the patient from others to prevent possible infection of others."
+            },
+            {
+              "clip": "en_us_test_77.wav",
+              "expected": "en",
+              "detected": "en",
+              "probability": 0.801332950592041,
+              "detection_ms": 23.931786,
+              "text": "This is called a chemicals pH. You can make an indicator using red cabbage juice."
+            }
+          ]
+        },
+        "restricted_hi_en_te": {
+          "clips": 4,
+          "mean_detection_ms": 30.791050499999997,
+          "min_probability": 0.9931401610374451,
+          "wrong": [],
+          "rows": [
+            {
+              "clip": "hi_in_test_7.wav",
+              "expected": "hi",
+              "detected": "hi",
+              "probability": 0.9959348440170288,
+              "detection_ms": 27.112039,
+              "text": "इसे कैमिकल का पीएज कहा जाता है आप लाल गोभी के जूस को इस्तेमाल करके एक संकेतक बना सकते हैं"
+            },
+            {
+              "clip": "hi_in_test_42.wav",
+              "expected": "hi",
+              "detected": "hi",
+              "probability": 0.9931401610374451,
+              "detection_ms": 24.648028,
+              "text": "महिलाये या अनुश्रंशा की जाती है कि कोई भी महिलायात्री वास्तविक विवाई क्तिति के बावजुद कहती है कि वह विवाइत है"
+            },
+            {
+              "clip": "en_us_test_5.wav",
+              "expected": "en",
+              "detected": "en",
+              "probability": 0.9999910593032837,
+              "detection_ms": 37.861551,
+              "text": "The hospital has followed protocol for infection control, including separating the patient from others to prevent possible infection of others."
+            },
+            {
+              "clip": "en_us_test_77.wav",
+              "expected": "en",
+              "detected": "en",
+              "probability": 0.9998602867126465,
+              "detection_ms": 33.542584,
+              "text": "This is called a chemicals pH. You can make an indicator using red cabbage juice."
+            }
+          ]
+        }
+      },
+      "error": "adapter skews unrestricted detection: ['hi_in_test_7.wav→ca', 'hi_in_test_42.wav→ca'] (training labels lacked <|lang|>; see EXPERIMENTS.md)",
+      "seconds": 12.361779164999916
+    },
+    {
+      "name": "long_form_chunking",
+      "status": "pass",
+      "detail": {
+        "audio_seconds": 58.4,
+        "chunks": 3,
+        "wer_vs_concatenated_refs": 26.984126984126984,
+        "rtf": 0.23841469228004109,
+        "text": "इसे कैमिकल का पीएज कहा जाता है आप लाल गोभी के जूस को इस्तेमाल करके एक संकेतक बना सकते हैं महिलाये या अनुश्रणशा की जाती है कि कोई भी महिलायात रिवास्तविक व्यवाई क्तिति के बावजुग कहती है कि वह व्यवाइत है सड़कों पर ज्यादा धुरक� वजह बहुत ज्यादा कार ओनरशिप है जिससे शरीर में हुई टूटफुट को सुधारने के लिए हेल्थ कैर में नई तक्नीकों के अविश्कार को बढ़ावा मिला है परिषर के किनारें ज्यादातर इमारतें फिर से बनाई गई हैं ताकि परिटो को बेहतर धंग से पता चल पता चले कि वे मूल रूप में कैसी दिखाई देती थी सावधान रहे कि कपड़े को बहुत गर्म न होने दे जो सिकूबनी का कारण बन सकता है या बहुत गर्म होने पर जल सकता है"
+      },
+      "error": null,
+      "seconds": 13.944878128000028
+    },
+    {
+      "name": "streaming_session",
+      "status": "pass",
+      "detail": {
+        "utterances_expected": 2,
+        "finals": 2,
+        "partials": 11,
+        "wer_vs_refs": 23.809523809523807,
+        "wer_vs_offline": 12.195121951219512,
+        "online_vs_offline_vad": 1.0,
+        "offline_vad_segments": 2,
+        "min_clip_coverage": 0.836,
+        "final_asr_ms_mean": 2492.9435115,
+        "endpoint_reasons": [
+          "silence",
+          "silence"
+        ],
+        "finals_detail": [
+          {
+            "start": 0.75,
+            "seconds": 6.87,
+            "reason": "silence",
+            "text": "इसे कैमिकल का पीएज कहा जाता है आप लाल गोभी के जूस को इस्तेमाल करके एक संकेतक बना सकते हैं"
+          },
+          {
+            "start": 9.4,
+            "seconds": 7.72,
+            "reason": "silence",
+            "text": "महिलाए या अनुशंशा की जाती है कि कोई भी महिला यात्री वास्तविक व्यवाई क्तिति के बावजुद कहती है कि वह विवाइत है"
+          }
+        ],
+        "offline_vad_detail": [
+          {
+            "start": 0.75,
+            "end": 7.62
+          },
+          {
+            "start": 9.4,
+            "end": 16.77
+          }
+        ],
+        "coverage": [
+          {
+            "clip": "hi_in_test_7.wav",
+            "covered_fraction": 0.836
+          },
+          {
+            "clip": "hi_in_test_42.wav",
+            "covered_fraction": 0.906
+          }
+        ],
+        "offline_hypotheses": [
+          "इसे कैमिकल का पीएज कहा जाता है आप लाल गोभी के जूस को इस्तेमाल करके एक संकेतक बना सकते हैं",
+          "महिलाये या अनुश्रंशा की जाती है कि कोई भी महिलायात्री वास्तविक विवाई क्तिति के बावजुद कहती है कि वह विवाइत है"
+        ],
+        "updates": [
+          {
+            "kind": "state",
+            "sequence": 1,
+            "session_id": "d5a741e0cfd1",
+            "state": "speaking",
+            "utterance_index": 0,
+            "text": "",
+            "is_final": false,
+            "endpoint_reason": null,
+            "audio_seconds": 0.0,
+            "stream_seconds": 1.3,
+            "utterance_start_seconds": 0.75,
+            "asr_ms": 0.0,
+            "real_time_factor": 0.0,
+            "long_form": false,
+            "partial_is_tail": false
+          },
+          {
+            "kind": "partial",
+            "sequence": 2,
+            "session_id": "d5a741e0cfd1",
+            "state": "speaking",
+            "utterance_index": 0,
+            "text": "इसे कैमिकल का पीएज का हा",
+            "is_final": false,
+            "endpoint_reason": null,
+            "audio_seconds": 1.75,
+            "stream_seconds": 2.5,
+            "utterance_start_seconds": 0.75,
+            "asr_ms": 603.223,
+            "real_time_factor": 0.3447,
+            "long_form": false,
+            "partial_is_tail": false
+          },
+          {
+            "kind": "partial",
+            "sequence": 3,
+            "session_id": "d5a741e0cfd1",
+            "state": "speaking",
+            "utterance_index": 0,
+            "text": "इसे कैमिकल का पीएज कहा जाता है आप",
+            "is_final": false,
+            "endpoint_reason": null,
+            "audio_seconds": 2.95,
+            "stream_seconds": 3.7,
+            "utterance_start_seconds": 0.75,
+            "asr_ms": 833.166,
+            "real_time_factor": 0.2824,
+            "long_form": false,
+            "partial_is_tail": false
+          },
+          {
+            "kind": "partial",
+            "sequence": 4,
+            "session_id": "d5a741e0cfd1",
+            "state": "speaking",
+            "utterance_index": 0,
+            "text": "इसे कैमिकल का पीएज कहा जाता है आप लाल गोभी के जूस को",
+            "is_final": false,
+            "endpoint_reason": null,
+            "audio_seconds": 4.15,
+            "stream_seconds": 4.9,
+            "utterance_start_seconds": 0.75,
+            "asr_ms": 1267.744,
+            "real_time_factor": 0.3055,
+            "long_form": false,
+            "partial_is_tail": false
+          },
+          {
+            "kind": "partial",
+            "sequence": 5,
+            "session_id": "d5a741e0cfd1",
+            "state": "speaking",
+            "utterance_index": 0,
+            "text": "इसे कैमिकल का पीएज कहा जाता है आप लाल गोभी के जूस को इस्तेमाल करके एक संक्र",
+            "is_final": false,
+            "endpoint_reason": null,
+            "audio_seconds": 5.35,
+            "stream_seconds": 6.1,
+            "utterance_start_seconds": 0.75,
+            "asr_ms": 1803.934,
+            "real_time_factor": 0.3372,
+            "long_form": false,
+            "partial_is_tail": false
+          },
+          {
+            "kind": "partial",
+            "sequence": 6,
+            "session_id": "d5a741e0cfd1",
+            "state": "speaking",
+            "utterance_index": 0,
+            "text": "इसे कैमिकल का पीएज कहा जाता है आप लाल गोभी के जूस को इस्तेमाल करके एक संकेतक बना सकते हैं",
+            "is_final": false,
+            "endpoint_reason": null,
+            "audio_seconds": 6.55,
+            "stream_seconds": 7.3,
+            "utterance_start_seconds": 0.75,
+            "asr_ms": 2652.559,
+            "real_time_factor": 0.405,
+            "long_form": false,
+            "partial_is_tail": false
+          },
+          {
+            "kind": "final",
+            "sequence": 7,
+            "session_id": "d5a741e0cfd1",
+            "state": "idle",
+            "utterance_index": 0,
+            "text": "इसे कैमिकल का पीएज कहा जाता है आप लाल गोभी के जूस को इस्तेमाल करके एक संकेतक बना सकते हैं",
+            "is_final": true,
+            "endpoint_reason": "silence",
+            "audio_seconds": 6.87,
+            "stream_seconds": 8.1,
+            "utterance_start_seconds": 0.75,
+            "asr_ms": 1976.508,
+            "real_time_factor": 0.2877,
+            "long_form": false,
+            "partial_is_tail": false
+          },
+          {
+            "kind": "state",
+            "sequence": 8,
+            "session_id": "d5a741e0cfd1",
+            "state": "idle",
+            "utterance_index": 1,
+            "text": "",
+            "is_final": false,
+            "endpoint_reason": null,
+            "audio_seconds": 0.0,
+            "stream_seconds": 8.1,
+            "utterance_start_seconds": 0.0,
+            "asr_ms": 0.0,
+            "real_time_factor": 0.0,
+            "long_form": false,
+            "partial_is_tail": false
+          },
+          {
+            "kind": "state",
+            "sequence": 9,
+            "session_id": "d5a741e0cfd1",
+            "state": "speaking",
+            "utterance_index": 1,
+            "text": "",
+            "is_final": false,
+            "endpoint_reason": null,
+            "audio_seconds": 0.0,
+            "stream_seconds": 9.9,
+            "utterance_start_seconds": 9.4,
+            "asr_ms": 0.0,
+            "real_time_factor": 0.0,
+            "long_form": false,
+            "partial_is_tail": false
+          },
+          {
+            "kind": "partial",
+            "sequence": 10,
+            "session_id": "d5a741e0cfd1",
+            "state": "speaking",
+            "utterance_index": 1,
+            "text": "हिलाए या",
+            "is_final": false,
+            "endpoint_reason": null,
+            "audio_seconds": 1.7,
+            "stream_seconds": 11.1,
+            "utterance_start_seconds": 9.4,
+            "asr_ms": 327.845,
+            "real_time_factor": 0.1928,
+            "long_form": false,
+            "partial_is_tail": false
+          },
+          {
+            "kind": "partial",
+            "sequence": 11,
+            "session_id": "d5a741e0cfd1",
+            "state": "speaking",
+            "utterance_index": 1,
+            "text": "हिलाए या अनु संशा की जाती है",
+            "is_final": false,
+            "endpoint_reason": null,
+            "audio_seconds": 2.9,
+            "stream_seconds": 12.3,
+            "utterance_start_seconds": 9.4,
+            "asr_ms": 707.996,
+            "real_time_factor": 0.2441,
+            "long_form": false,
+            "partial_is_tail": false
+          },
+          {
+            "kind": "partial",
+            "sequence": 12,
+            "session_id": "d5a741e0cfd1",
+            "state": "speaking",
+            "utterance_index": 1,
+            "text": "महिलाए या अनु संशा की जाती है कि कोई भी महिला याती",
+            "is_final": false,
+            "endpoint_reason": null,
+            "audio_seconds": 4.1,
+            "stream_seconds": 13.5,
+            "utterance_start_seconds": 9.4,
+            "asr_ms": 1156.547,
+            "real_time_factor": 0.2821,
+            "long_form": false,
+            "partial_is_tail": false
+          },
+          {
+            "kind": "partial",
+            "sequence": 13,
+            "session_id": "d5a741e0cfd1",
+            "state": "speaking",
+            "utterance_index": 1,
+            "text": "महिलाए या अनुशंशा की जाति है कि कोई भी महिला यात्री वास्तविक व्यवाई क्तित",
+            "is_final": false,
+            "endpoint_reason": null,
+            "audio_seconds": 5.3,
+            "stream_seconds": 14.7,
+            "utterance_start_seconds": 9.4,
+            "asr_ms": 1728.412,
+            "real_time_factor": 0.3261,
+            "long_form": false,
+            "partial_is_tail": false
+          },
+          {
+            "kind": "partial",
+            "sequence": 14,
+            "session_id": "d5a741e0cfd1",
+            "state": "speaking",
+            "utterance_index": 1,
+            "text": "महिलाए या अनुश्रणशा की जाती है कि कोई भी महिला यात्री वास्तविक व्यवाई क्तिति के बावजुद कहती है कि",
+            "is_final": false,
+            "endpoint_reason": null,
+            "audio_seconds": 6.5,
+            "stream_seconds": 15.9,
+            "utterance_start_seconds": 9.4,
+            "asr_ms": 2285.008,
+            "real_time_factor": 0.3515,
+            "long_form": false,
+            "partial_is_tail": false
+          },
+          {
+            "kind": "partial",
+            "sequence": 15,
+            "session_id": "d5a741e0cfd1",
+            "state": "speaking",
+            "utterance_index": 1,
+            "text": "महिलाए या अनुशंशा की जाती है कि कोई भी महिला यात्री वास्तविक व्यवाई क्तिति के बावजुद कहती है कि वह विवाइत है",
+            "is_final": false,
+            "endpoint_reason": null,
+            "audio_seconds": 7.7,
+            "stream_seconds": 17.1,
+            "utterance_start_seconds": 9.4,
+            "asr_ms": 2866.986,
+            "real_time_factor": 0.3723,
+            "long_form": false,
+            "partial_is_tail": false
+          },
+          {
+            "kind": "final",
+            "sequence": 16,
+            "session_id": "d5a741e0cfd1",
+            "state": "idle",
+            "utterance_index": 1,
+            "text": "महिलाए या अनुशंशा की जाती है कि कोई भी महिला यात्री वास्तविक व्यवाई क्तिति के बावजुद कहती है कि वह विवाइत है",
+            "is_final": true,
+            "endpoint_reason": "silence",
+            "audio_seconds": 7.72,
+            "stream_seconds": 17.6,
+            "utterance_start_seconds": 9.4,
+            "asr_ms": 3009.379,
+            "real_time_factor": 0.3898,
+            "long_form": false,
+            "partial_is_tail": false
+          },
+          {
+            "kind": "state",
+            "sequence": 17,
+            "session_id": "d5a741e0cfd1",
+            "state": "idle",
+            "utterance_index": 2,
+            "text": "",
+            "is_final": false,
+            "endpoint_reason": null,
+            "audio_seconds": 0.0,
+            "stream_seconds": 17.6,
+            "utterance_start_seconds": 0.0,
+            "asr_ms": 0.0,
+            "real_time_factor": 0.0,
+            "long_form": false,
+            "partial_is_tail": false
+          },
+          {
+            "kind": "state",
+            "sequence": 18,
+            "session_id": "d5a741e0cfd1",
+            "state": "closed",
+            "utterance_index": 2,
+            "text": "",
+            "is_final": false,
+            "endpoint_reason": null,
+            "audio_seconds": 0.0,
+            "stream_seconds": 18.74,
+            "utterance_start_seconds": 0.0,
+            "asr_ms": 0.0,
+            "real_time_factor": 0.0,
+            "long_form": false,
+            "partial_is_tail": false
+          }
+        ]
+      },
+      "error": null,
+      "seconds": 25.805728343999817
+    },
+    {
+      "name": "load_llm",
+      "status": "pass",
+      "detail": {
+        "llm": "Qwen/Qwen3-0.6B",
+        "strategy": "concurrent"
+      },
+      "error": null,
+      "seconds": 2.929693979000149
+    },
+    {
+      "name": "llm_prompt_and_decoding",
+      "status": "pass",
+      "detail": {
+        "prompt_has_empty_think": true,
+        "generated_tokens": 65,
+        "prefill_ms": 348.6919860839844,
+        "mean_decode_ms": 45.51414257287979,
+        "response": "जूस के इस्तेमान के द्वारा के�मिकल प्रणाली के अध्ययन में लाल गोभी बनाना।"
+      },
+      "error": null,
+      "seconds": 3.3461833300000308
+    },
+    {
+      "name": "pipeline_waterfall",
+      "status": "pass",
+      "detail": {
+        "strategy": "concurrent",
+        "mel_ms": 14.377256666666668,
+        "encoder_ms": 80.38227081298828,
+        "asr_decode_ms": 1900.2168083190918,
+        "llm_prefill_ms": 105.0146967569987,
+        "llm_decode_ms": 2323.5581843058267,
+        "total_ms": 4514.515189666666,
+        "audio_to_first_llm_token_ms": 2159.303421423665,
+        "peak_vram_gib": 2.60540771484375,
+        "transcript": "इसे कैमिकल का पीएज कहा जाता है आप लाल गोभी के जूस को इस्तेमाल करके एक संकेतक बना सकते हैं",
+        "answer": "यह अवसर लाल गोभी के जूस के द्वारा एक संकेतक बनाने म"
+      },
+      "error": null,
+      "seconds": 18.577259068000103
+    },
+    {
+      "name": "voice_turn_real_tts",
+      "status": "pass",
+      "detail": {
+        "sentences": 1,
+        "chunks": 66,
+        "audio_bytes": 47376,
+        "tts_first_chunk_ms": 619.743612,
+        "final_transcript_to_first_llm_token_ms": 99.96224212646484,
+        "first_llm_token_to_playback_start_ms": 619.8595239999704,
+        "response_latency_ms": 719.8217661264353,
+        "first_token_is_prefill_proxy": true,
+        "response": "जूस के इस्तेमान के द्वारा के�मिकल का प्रयोग करके लाल गोभी के उपयोग में एक संकेतक बना सकते हैं।",
+        "turn": {
+          "turn_id": "e8f701ef357a",
+          "state": "completed",
+          "transcript": "इसे केमिकल का ph कहा जाता है आप लाल गोभी के जूस का इस्तेमाल करके एक संकेतक बना सकते हैं",
+          "response": "जूस के इस्तेमान के द्वारा के�मिकल का प्रयोग करके लाल गोभी के उपयोग में एक संकेतक बना सकते हैं।",
+          "metrics": {
+            "speech_end_to_final_transcript_ms": 0.0,
+            "final_transcript_to_first_llm_token_ms": 99.962,
+            "first_llm_token_to_playback_start_ms": 619.86,
+            "response_latency_ms": 719.822,
+            "total_turn_ms": 4797.124,
+            "llm_total_ms": 3937.359,
+            "tts_first_chunk_ms": 619.744,
+            "playback_first_audio_ms": 619.808,
+            "llm_streaming": false,
+            "first_token_is_prefill_proxy": true,
+            "tts_streaming": true,
+            "tts_sentence_level": true,
+            "barge_in": false
+          },
+          "speech": {
+            "sentences": 1,
+            "chunks": 66,
+            "total_bytes": 47376,
+            "first_chunk_ms": 619.744,
+            "total_ms": 859.378,
+            "streaming": true,
+            "error": null
+          },
+          "playback": {
+            "playback_id": "e8f701ef357a",
+            "state": "completed",
+            "chunks_written": 66,
+            "bytes_written": 47376,
+            "first_audio_ms": 619.808,
+            "total_ms": 859.453,
+            "cancel_reason": "",
+            "error": null,
+            "events": [
+              {
+                "kind": "started",
+                "sequence": 1,
+                "playback_id": "e8f701ef357a",
+                "state": "starting",
+                "elapsed_ms": 0.008,
+                "chunk_index": null,
+                "bytes_written": 0,
+                "detail": ""
+              },
+              {
+                "kind": "first_audio",
+                "sequence": 2,
+                "playback_id": "e8f701ef357a",
+                "state": "playing",
+                "elapsed_ms": 619.816,
+                "chunk_index": 0,
+                "bytes_written": 720,
+                "detail": ""
+              },
+              {
+                "kind": "chunk",
+                "sequence": 3,
+                "playback_id": "e8f701ef357a",
+                "state": "playing",
+                "elapsed_ms": 620.58,
+                "chunk_index": 1,
+                "bytes_written": 720,
+                "detail": ""
+              },
+              {
+                "kind": "chunk",
+                "sequence": 4,
+                "playback_id": "e8f701ef357a",
+                "state": "playing",
+                "elapsed_ms": 621.202,
+                "chunk_index": 2,
+                "bytes_written": 720,
+                "detail": ""
+              },
+              {
+                "kind": "chunk",
+                "sequence": 5,
+                "playback_id": "e8f701ef357a",
+                "state": "playing",
+                "elapsed_ms": 630.529,
+                "chunk_index": 3,
+                "bytes_written": 720,
+                "detail": ""
+              },
+              {
+                "kind": "chunk",
+                "sequence": 6,
+                "playback_id": "e8f701ef357a",
+                "state": "playing",
+                "elapsed_ms": 632.875,
+                "chunk_index": 4,
+                "bytes_written": 720,
+                "detail": ""
+              },
+              {
+                "kind": "chunk",
+                "sequence": 7,
+                "playback_id": "e8f701ef357a",
+                "state": "playing",
+                "elapsed_ms": 637.294,
+                "chunk_index": 5,
+                "bytes_written": 720,
+                "detail": ""
+              },
+              {
+                "kind": "chunk",
+                "sequence": 8,
+                "playback_id": "e8f701ef357a",
+                "state": "playing",
+                "elapsed_ms": 691.234,
+                "chunk_index": 6,
+                "bytes_written": 720,
+                "detail": ""
+              },
+              {
+                "kind": "chunk",
+                "sequence": 9,
+                "playback_id": "e8f701ef357a",
+                "state": "playing",
+                "elapsed_ms": 691.43,
+                "chunk_index": 7,
+                "bytes_written": 720,
+                "detail": ""
+              },
+              {
+                "kind": "chunk",
+                "sequence": 10,
+                "playback_id": "e8f701ef357a",
+                "state": "playing",
+                "elapsed_ms": 698.484,
+                "chunk_index": 8,
+                "bytes_written": 720,
+                "detail": ""
+              },
+              {
+                "kind": "chunk",
+                "sequence": 11,
+                "playback_id": "e8f701ef357a",
+                "state": "playing",
+                "elapsed_ms": 698.764,
+                "chunk_index": 9,
+                "bytes_written": 720,
+                "detail": ""
+              },
+              {
+                "kind": "chunk",
+                "sequence": 12,
+                "playback_id": "e8f701ef357a",
+                "state": "playing",
+                "elapsed_ms": 698.819,
+                "chunk_index": 10,
+                "bytes_written": 720,
+                "detail": ""
+              },
+              {
+                "kind": "chunk",
+                "sequence": 13,
+                "playback_id": "e8f701ef357a",
+                "state": "playing",
+                "elapsed_ms": 699.095,
+                "chunk_index": 11,
+                "bytes_written": 720,
+                "detail": ""
+              },
+              {
+                "kind": "chunk",
+                "sequence": 14,
+                "playback_id": "e8f701ef357a",
+                "state": "playing",
+                "elapsed_ms": 699.113,
+                "chunk_index": 12,
+                "bytes_written": 720,
+                "detail": ""
+              },
+              {
+                "kind": "chunk",
+                "sequence": 15,
+                "playback_id": "e8f701ef357a",
+                "state": "playing",
+                "elapsed_ms": 699.129,
+                "chunk_index": 13,
+                "bytes_written": 720,
+                "detail": ""
+              },
+              {
+                "kind": "chunk",
+                "sequence": 16,
+                "playback_id": "e8f701ef357a",
+                "state": "playing",
+                "elapsed_ms": 699.15,
+                "chunk_index": 14,
+                "bytes_written": 720,
+                "detail": ""
+              },
+              {
+                "kind": "chunk",
+                "sequence": 17,
+                "playback_id": "e8f701ef357a",
+                "state": "playing",
+                "elapsed_ms": 699.422,
+                "chunk_index": 15,
+                "bytes_written": 720,
+                "detail": ""
+              },
+              {
+                "kind": "chunk",
+                "sequence": 18,
+                "playback_id": "e8f701ef357a",
+                "state": "playing",
+                "elapsed_ms": 699.457,
+                "chunk_index": 16,
+                "bytes_written": 720,
+                "detail": ""
+              },
+              {
+                "kind": "chunk",
+                "sequence": 19,
+                "playback_id": "e8f701ef357a",
+                "state": "playing",
+                "elapsed_ms": 699.474,
+                "chunk_index": 17,
+                "bytes_written": 720,
+                "detail": ""
+              },
+              {
+                "kind": "chunk",
+                "sequence": 20,
+                "playback_id": "e8f701ef357a",
+                "state": "playing",
+                "elapsed_ms": 699.481,
+                "chunk_index": 18,
+                "bytes_written": 720,
+                "detail": ""
+              },
+              {
+                "kind": "chunk",
+                "sequence": 21,
+                "playback_id": "e8f701ef357a",
+                "state": "playing",
+                "elapsed_ms": 699.687,
+                "chunk_index": 19,
+                "bytes_written": 720,
+                "detail": ""
+              },
+              {
+                "kind": "chunk",
+                "sequence": 22,
+                "playback_id": "e8f701ef357a",
+                "state": "playing",
+                "elapsed_ms": 699.719,
+                "chunk_index": 20,
+                "bytes_written": 720,
+                "detail": ""
+              },
+              {
+                "kind": "chunk",
+                "sequence": 23,
+                "playback_id": "e8f701ef357a",
+                "state": "playing",
+                "elapsed_ms": 706.393,
+                "chunk_index": 21,
+                "bytes_written": 720,
+                "detail": ""
+              },
+              {
+                "kind": "chunk",
+                "sequence": 24,
+                "playback_id": "e8f701ef357a",
+                "state": "playing",
+                "elapsed_ms": 706.412,
+                "chunk_index": 22,
+                "bytes_written": 720,
+                "detail": ""
+              },
+              {
+                "kind": "chunk",
+                "sequence": 25,
+                "playback_id": "e8f701ef357a",
+                "state": "playing",
+                "elapsed_ms": 706.602,
+                "chunk_index": 23,
+                "bytes_written": 720,
+                "detail": ""
+              },
+              {
+                "kind": "chunk",
+                "sequence": 26,
+                "playback_id": "e8f701ef357a",
+                "state": "playing",
+                "elapsed_ms": 713.318,
+                "chunk_index": 24,
+                "bytes_written": 720,
+                "detail": ""
+              },
+              {
+                "kind": "chunk",
+                "sequence": 27,
+                "playback_id": "e8f701ef357a",
+                "state": "playing",
+                "elapsed_ms": 713.622,
+                "chunk_index": 25,
+                "bytes_written": 720,
+                "detail": ""
+              },
+              {
+                "kind": "chunk",
+                "sequence": 28,
+                "playback_id": "e8f701ef357a",
+                "state": "playing",
+                "elapsed_ms": 713.641,
+                "chunk_index": 26,
+                "bytes_written": 720,
+                "detail": ""
+              },
+              {
+                "kind": "chunk",
+                "sequence": 29,
+                "playback_id": "e8f701ef357a",
+                "state": "playing",
+                "elapsed_ms": 713.875,
+                "chunk_index": 27,
+                "bytes_written": 720,
+                "detail": ""
+              },
+              {
+                "kind": "chunk",
+                "sequence": 30,
+                "playback_id": "e8f701ef357a",
+                "state": "playing",
+                "elapsed_ms": 764.295,
+                "chunk_index": 28,
+                "bytes_written": 720,
+                "detail": ""
+              },
+              {
+                "kind": "chunk",
+                "sequence": 31,
+                "playback_id": "e8f701ef357a",
+                "state": "playing",
+                "elapsed_ms": 764.316,
+                "chunk_index": 29,
+                "bytes_written": 720,
+                "detail": ""
+              },
+              {
+                "kind": "chunk",
+                "sequence": 32,
+                "playback_id": "e8f701ef357a",
+                "state": "playing",
+                "elapsed_ms": 764.582,
+                "chunk_index": 30,
+                "bytes_written": 720,
+                "detail": ""
+              },
+              {
+                "kind": "chunk",
+                "sequence": 33,
+                "playback_id": "e8f701ef357a",
+                "state": "playing",
+                "elapsed_ms": 764.619,
+                "chunk_index": 31,
+                "bytes_written": 720,
+                "detail": ""
+              },
+              {
+                "kind": "chunk",
+                "sequence": 34,
+                "playback_id": "e8f701ef357a",
+                "state": "playing",
+                "elapsed_ms": 764.876,
+                "chunk_index": 32,
+                "bytes_written": 720,
+                "detail": ""
+              },
+              {
+                "kind": "chunk",
+                "sequence": 35,
+                "playback_id": "e8f701ef357a",
+                "state": "playing",
+                "elapsed_ms": 764.899,
+                "chunk_index": 33,
+                "bytes_written": 720,
+                "detail": ""
+              },
+              {
+                "kind": "chunk",
+                "sequence": 36,
+                "playback_id": "e8f701ef357a",
+                "state": "playing",
+                "elapsed_ms": 764.909,
+                "chunk_index": 34,
+                "bytes_written": 720,
+                "detail": ""
+              },
+              {
+                "kind": "chunk",
+                "sequence": 37,
+                "playback_id": "e8f701ef357a",
+                "state": "playing",
+                "elapsed_ms": 765.241,
+                "chunk_index": 35,
+                "bytes_written": 720,
+                "detail": ""
+              },
+              {
+                "kind": "chunk",
+                "sequence": 38,
+                "playback_id": "e8f701ef357a",
+                "state": "playing",
+                "elapsed_ms": 765.256,
+                "chunk_index": 36,
+                "bytes_written": 720,
+                "detail": ""
+              },
+              {
+                "kind": "chunk",
+                "sequence": 39,
+                "playback_id": "e8f701ef357a",
+                "state": "playing",
+                "elapsed_ms": 765.274,
+                "chunk_index": 37,
+                "bytes_written": 720,
+                "detail": ""
+              },
+              {
+                "kind": "chunk",
+                "sequence": 40,
+                "playback_id": "e8f701ef357a",
+                "state": "playing",
+                "elapsed_ms": 765.577,
+                "chunk_index": 38,
+                "bytes_written": 720,
+                "detail": ""
+              },
+              {
+                "kind": "chunk",
+                "sequence": 41,
+                "playback_id": "e8f701ef357a",
+                "state": "playing",
+                "elapsed_ms": 765.592,
+                "chunk_index": 39,
+                "bytes_written": 720,
+                "detail": ""
+              },
+              {
+                "kind": "chunk",
+                "sequence": 42,
+                "playback_id": "e8f701ef357a",
+                "state": "playing",
+                "elapsed_ms": 765.621,
+                "chunk_index": 40,
+                "bytes_written": 720,
+                "detail": ""
+              },
+              {
+                "kind": "chunk",
+                "sequence": 43,
+                "playback_id": "e8f701ef357a",
+                "state": "playing",
+                "elapsed_ms": 765.633,
+                "chunk_index": 41,
+                "bytes_written": 720,
+                "detail": ""
+              },
+              {
+                "kind": "chunk",
+                "sequence": 44,
+                "playback_id": "e8f701ef357a",
+                "state": "playing",
+                "elapsed_ms": 765.943,
+                "chunk_index": 42,
+                "bytes_written": 720,
+                "detail": ""
+              },
+              {
+                "kind": "chunk",
+                "sequence": 45,
+                "playback_id": "e8f701ef357a",
+                "state": "playing",
+                "elapsed_ms": 765.959,
+                "chunk_index": 43,
+                "bytes_written": 720,
+                "detail": ""
+              },
+              {
+                "kind": "chunk",
+                "sequence": 46,
+                "playback_id": "e8f701ef357a",
+                "state": "playing",
+                "elapsed_ms": 765.986,
+                "chunk_index": 44,
+                "bytes_written": 720,
+                "detail": ""
+              },
+              {
+                "kind": "chunk",
+                "sequence": 47,
+                "playback_id": "e8f701ef357a",
+                "state": "playing",
+                "elapsed_ms": 765.997,
+                "chunk_index": 45,
+                "bytes_written": 720,
+                "detail": ""
+              },
+              {
+                "kind": "chunk",
+                "sequence": 48,
+                "playback_id": "e8f701ef357a",
+                "state": "playing",
+                "elapsed_ms": 766.279,
+                "chunk_index": 46,
+                "bytes_written": 720,
+                "detail": ""
+              },
+              {
+                "kind": "chunk",
+                "sequence": 49,
+                "playback_id": "e8f701ef357a",
+                "state": "playing",
+                "elapsed_ms": 766.294,
+                "chunk_index": 47,
+                "bytes_written": 720,
+                "detail": ""
+              },
+              {
+                "kind": "chunk",
+                "sequence": 50,
+                "playback_id": "e8f701ef357a",
+                "state": "playing",
+                "elapsed_ms": 766.305,
+                "chunk_index": 48,
+                "bytes_written": 720,
+                "detail": ""
+              },
+              {
+                "kind": "chunk",
+                "sequence": 51,
+                "playback_id": "e8f701ef357a",
+                "state": "playing",
+                "elapsed_ms": 766.315,
+                "chunk_index": 49,
+                "bytes_written": 720,
+                "detail": ""
+              },
+              {
+                "kind": "chunk",
+                "sequence": 52,
+                "playback_id": "e8f701ef357a",
+                "state": "playing",
+                "elapsed_ms": 766.533,
+                "chunk_index": 50,
+                "bytes_written": 720,
+                "detail": ""
+              },
+              {
+                "kind": "chunk",
+                "sequence": 53,
+                "playback_id": "e8f701ef357a",
+                "state": "playing",
+                "elapsed_ms": 766.555,
+                "chunk_index": 51,
+                "bytes_written": 720,
+                "detail": ""
+              },
+              {
+                "kind": "chunk",
+                "sequence": 54,
+                "playback_id": "e8f701ef357a",
+                "state": "playing",
+                "elapsed_ms": 766.567,
+                "chunk_index": 52,
+                "bytes_written": 720,
+                "detail": ""
+              },
+              {
+                "kind": "chunk",
+                "sequence": 55,
+                "playback_id": "e8f701ef357a",
+                "state": "playing",
+                "elapsed_ms": 766.839,
+                "chunk_index": 53,
+                "bytes_written": 720,
+                "detail": ""
+              },
+              {
+                "kind": "chunk",
+                "sequence": 56,
+                "playback_id": "e8f701ef357a",
+                "state": "playing",
+                "elapsed_ms": 766.854,
+                "chunk_index": 54,
+                "bytes_written": 720,
+                "detail": ""
+              },
+              {
+                "kind": "chunk",
+                "sequence": 57,
+                "playback_id": "e8f701ef357a",
+                "state": "playing",
+                "elapsed_ms": 767.113,
+                "chunk_index": 55,
+                "bytes_written": 720,
+                "detail": ""
+              },
+              {
+                "kind": "chunk",
+                "sequence": 58,
+                "playback_id": "e8f701ef357a",
+                "state": "playing",
+                "elapsed_ms": 767.128,
+                "chunk_index": 56,
+                "bytes_written": 720,
+                "detail": ""
+              },
+              {
+                "kind": "chunk",
+                "sequence": 59,
+                "playback_id": "e8f701ef357a",
+                "state": "playing",
+                "elapsed_ms": 767.142,
+                "chunk_index": 57,
+                "bytes_written": 720,
+                "detail": ""
+              },
+              {
+                "kind": "chunk",
+                "sequence": 60,
+                "playback_id": "e8f701ef357a",
+                "state": "playing",
+                "elapsed_ms": 767.153,
+                "chunk_index": 58,
+                "bytes_written": 720,
+                "detail": ""
+              },
+              {
+                "kind": "chunk",
+                "sequence": 61,
+                "playback_id": "e8f701ef357a",
+                "state": "playing",
+                "elapsed_ms": 767.314,
+                "chunk_index": 59,
+                "bytes_written": 720,
+                "detail": ""
+              },
+              {
+                "kind": "chunk",
+                "sequence": 62,
+                "playback_id": "e8f701ef357a",
+                "state": "playing",
+                "elapsed_ms": 771.978,
+                "chunk_index": 60,
+                "bytes_written": 720,
+                "detail": ""
+              },
+              {
+                "kind": "chunk",
+                "sequence": 63,
+                "playback_id": "e8f701ef357a",
+                "state": "playing",
+                "elapsed_ms": 771.997,
+                "chunk_index": 61,
+                "bytes_written": 720,
+                "detail": ""
+              },
+              {
+                "kind": "chunk",
+                "sequence": 64,
+                "playback_id": "e8f701ef357a",
+                "state": "playing",
+                "elapsed_ms": 772.285,
+                "chunk_index": 62,
+                "bytes_written": 720,
+                "detail": ""
+              },
+              {
+                "kind": "chunk",
+                "sequence": 65,
+                "playback_id": "e8f701ef357a",
+                "state": "playing",
+                "elapsed_ms": 772.301,
+                "chunk_index": 63,
+                "bytes_written": 720,
+                "detail": ""
+              },
+              {
+                "kind": "chunk",
+                "sequence": 66,
+                "playback_id": "e8f701ef357a",
+                "state": "playing",
+                "elapsed_ms": 772.516,
+                "chunk_index": 64,
+                "bytes_written": 720,
+                "detail": ""
+              },
+              {
+                "kind": "chunk",
+                "sequence": 67,
+                "playback_id": "e8f701ef357a",
+                "state": "playing",
+                "elapsed_ms": 772.53,
+                "chunk_index": 65,
+                "bytes_written": 576,
+                "detail": ""
+              },
+              {
+                "kind": "completed",
+                "sequence": 68,
+                "playback_id": "e8f701ef357a",
+                "state": "completed",
+                "elapsed_ms": 859.442,
+                "chunk_index": null,
+                "bytes_written": 0,
+                "detail": ""
+              }
+            ]
+          },
+          "error": null
+        }
+      },
+      "error": null,
+      "seconds": 4.814187649999894
+    },
+    {
+      "name": "barge_in_real_tts",
+      "status": "pass",
+      "detail": {
+        "cancelled_after_chunk": 1,
+        "sentences_planned": 1,
+        "chunks_synthesised": 1,
+        "playback_state": "cancelled",
+        "barge_in_flag": true,
+        "turn": {
+          "turn_id": "cc4545ef62fd",
+          "state": "interrupted",
+          "transcript": "इसे केमिकल का ph कहा जाता है आप लाल गोभी के जूस का इस्तेमाल करके एक संकेतक बना सकते हैं",
+          "response": "जूस के इस्तेमान के द्वारा के�मिकल का प्रयोग करके लाल गोभी के उपयोग में एक संकेतक बना सकते हैं।",
+          "metrics": {
+            "speech_end_to_final_transcript_ms": null,
+            "final_transcript_to_first_llm_token_ms": 145.041,
+            "first_llm_token_to_playback_start_ms": 455.425,
+            "response_latency_ms": null,
+            "total_turn_ms": 4583.972,
+            "llm_total_ms": 4028.013,
+            "tts_first_chunk_ms": 455.314,
+            "playback_first_audio_ms": 455.396,
+            "llm_streaming": false,
+            "first_token_is_prefill_proxy": true,
+            "tts_streaming": true,
+            "tts_sentence_level": true,
+            "barge_in": true
+          },
+          "speech": {
+            "sentences": 1,
+            "chunks": 1,
+            "total_bytes": 720,
+            "first_chunk_ms": 455.314,
+            "total_ms": 555.54,
+            "streaming": true,
+            "error": null
+          },
+          "playback": {
+            "playback_id": "cc4545ef62fd",
+            "state": "cancelled",
+            "chunks_written": 1,
+            "bytes_written": 720,
+            "first_audio_ms": 455.396,
+            "total_ms": 455.432,
+            "cancel_reason": "validation_barge_in",
+            "error": null,
+            "events": [
+              {
+                "kind": "started",
+                "sequence": 1,
+                "playback_id": "cc4545ef62fd",
+                "state": "starting",
+                "elapsed_ms": 0.005,
+                "chunk_index": null,
+                "bytes_written": 0,
+                "detail": ""
+              },
+              {
+                "kind": "first_audio",
+                "sequence": 2,
+                "playback_id": "cc4545ef62fd",
+                "state": "playing",
+                "elapsed_ms": 455.403,
+                "chunk_index": 0,
+                "bytes_written": 720,
+                "detail": ""
+              },
+              {
+                "kind": "cancelled",
+                "sequence": 3,
+                "playback_id": "cc4545ef62fd",
+                "state": "cancelled",
+                "elapsed_ms": 455.424,
+                "chunk_index": null,
+                "bytes_written": 0,
+                "detail": "validation_barge_in"
+              }
+            ]
+          },
+          "error": null
+        }
+      },
+      "error": null,
+      "seconds": 4.584177658000044
+    }
+  ]
+}

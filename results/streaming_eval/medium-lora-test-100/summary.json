@@ -1,0 +1,41 @@
+{
+  "offline_wer_vs_reference": 27.2605,
+  "configs": {
+    "default": {
+      "wer_vs_reference": 27.0367,
+      "wer_vs_offline": 9.897,
+      "streaming_penalty_points": -0.2238,
+      "clips_split": 16,
+      "clips_empty": 0,
+      "onset_hallucinations": 1,
+      "vad_agreement_mean": 1.0
+    },
+    "fixed40": {
+      "wer_vs_reference": 34.6016,
+      "wer_vs_offline": 21.0479,
+      "streaming_penalty_points": 7.3411,
+      "clips_split": 25,
+      "clips_empty": 3,
+      "onset_hallucinations": 0,
+      "vad_agreement_mean": 1.0
+    },
+    "pad300": {
+      "wer_vs_reference": 27.0367,
+      "wer_vs_offline": 9.8074,
+      "streaming_penalty_points": -0.2238,
+      "clips_split": 16,
+      "clips_empty": 0,
+      "onset_hallucinations": 0,
+      "vad_agreement_mean": 1.0
+    },
+    "floor70": {
+      "wer_vs_reference": 26.7681,
+      "wer_vs_offline": 9.8522,
+      "streaming_penalty_points": -0.4924,
+      "clips_split": 14,
+      "clips_empty": 0,
+      "onset_hallucinations": 1,
+      "vad_agreement_mean": 1.0
+    }
+  }
+}

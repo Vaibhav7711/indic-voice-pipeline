@@ -1,0 +1,68 @@
+{
+  "clips": 100,
+  "wer_vs_reference": {
+    "micro_percent": 26.7681,
+    "macro_percent": 26.7994,
+    "utterances": 100,
+    "empty_references": 0,
+    "hits": 1691,
+    "substitutions": 504,
+    "deletions": 39,
+    "insertions": 55,
+    "errors": 598,
+    "reference_length": 2234
+  },
+  "wer_vs_offline": {
+    "micro_percent": 9.8522,
+    "macro_percent": 8.9878,
+    "utterances": 100,
+    "empty_references": 0,
+    "hits": 2045,
+    "substitutions": 173,
+    "deletions": 15,
+    "insertions": 32,
+    "errors": 220,
+    "reference_length": 2233
+  },
+  "offline_wer_vs_reference": {
+    "micro_percent": 27.2605,
+    "macro_percent": 27.1353,
+    "utterances": 100,
+    "empty_references": 0,
+    "hits": 1675,
+    "substitutions": 508,
+    "deletions": 51,
+    "insertions": 50,
+    "errors": 609,
+    "reference_length": 2234
+  },
+  "streaming_penalty_points": -0.4924,
+  "structure": {
+    "clips_with_one_final": 86,
+    "clips_split": 14,
+    "clips_empty": 0,
+    "mean_finals_per_clip": 1.22,
+    "onset_hallucinations": 1,
+    "vad_agreement_mean": 1.0,
+    "vad_agreement_p10": 1.0,
+    "endpoint_reasons": {
+      "silence": 122
+    }
+  },
+  "latency": {
+    "streamed_asr_ms_mean": 2797.8,
+    "offline_asr_ms_mean": 2725.9
+  },
+  "vad": {
+    "frame_ms": 30,
+    "hop_ms": 10,
+    "threshold_dbfs": -40.0,
+    "adaptive_threshold": true,
+    "noise_window_ms": 3000,
+    "noise_margin_db": 10.0,
+    "threshold_floor_dbfs": -70.0,
+    "min_speech_ms": 250,
+    "min_silence_ms": 600,
+    "padding_ms": 200
+  }
+}

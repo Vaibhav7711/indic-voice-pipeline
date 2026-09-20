@@ -251,6 +251,43 @@ Consequences:
   labels match the serving prompt. The next training run should verify
   unrestricted detection returns `hi` before it is promoted.
 
+### Streaming evaluation (2026-09-21)
+
+`benchmarks/streaming_eval.py`, Hindi LoRA v1, 100 seeded FLEURS-hi test clips
+(`seed=0`, mean 10.7 s), each streamed as 0.5 s silence + clip + 1 s silence
+in 100 ms blocks, `standard` normalization, Tesla T4, commit `21ebce7`.
+Evidence: `results/streaming_eval/medium-lora-test-100/`.
+
+Offline WER on the same 100 clips: **27.26%**.
+
+| VAD config | Streamed WER vs ref | Penalty vs offline | WER vs offline decode | Split clips | Empty | Onset halluc. |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| `fixed40` (pre-fix: fixed −40 dBFS) | 34.60% | **+7.34 pp** | 21.05% | 25 | 3 | 0 |
+| adaptive, pad 200, floor −60 | 27.04% | −0.22 pp | 9.90% | 16 | 0 | 1 |
+| adaptive, pad 300, floor −60 | 27.04% | −0.22 pp | 9.81% | 16 | 0 | 0 |
+| adaptive, pad 200, floor −70 | 26.77% | −0.49 pp | 9.85% | 14 | 0 | 1 |
+
+Reading it:
+
+- The fixed threshold cost **7.3 points** and lost three clips entirely; the
+  adaptive threshold plus the onset-trim fix (`asr/streaming/session.py`,
+  same day) bring streaming to offline quality. This is the number that
+  matters: streaming is no longer a quality regression.
+- "WER vs offline decode" ≈ 10% is not a loss: on the 84 single-final clips
+  it is 6.8% and nets to zero against the reference (different boundaries →
+  different greedy path). On the 16 split clips it is 23%: a split costs
+  context. Splits are the remaining streaming cost, and they are a
+  turn-taking problem (the agent would answer mid-sentence) more than a WER
+  one.
+- The floor and padding deltas are within noise on 100 clips (0.27 pp ≈ six
+  words). Both were adopted as defaults anyway because they are cheap and
+  mechanistically justified (pre-roll for soft onsets; floor irrelevant
+  outside near-silent recordings); confirm on 300 clips before citing them.
+
+**Decision:** `VADConfig` defaults are now adaptive, `padding_ms=300`,
+`threshold_floor_dbfs=-70`, `min_silence_ms=600`. This is the energy-VAD
+baseline a neural VAD (Silero) must beat on the same benchmark in Stage 5.
+
 ### Measuring latency while training runs
 
 Don't. RTF, p50 and p90 measured on a GPU that is simultaneously training

@@ -357,8 +357,17 @@ Tune `VADConfig` from this, never from the two clips in the validation sweep.
 
 ### Validation status
 
-Everything in this document is exercised against real models by
-`scripts/gpu_validation.py` (Kaggle notebook:
-`notebooks/gpu_validation_kaggle.ipynb`). Until `results/gpu_validation/report.json`
-is committed with a passing sweep, the "production logic" rows above mean
-"unit-tested against fakes", not "observed working on a GPU".
+Validated on a Tesla T4 on 2026-09-21 (`results/gpu_validation/report.json`,
+commit `21ebce7`): 15/15 checks pass; the one warning is the v1 adapter's
+unrestricted language detection (see `docs/EXPERIMENTS.md`). Measured on that
+run: streaming session 2 finals for 2 utterances with the onset intact,
+online/offline VAD agreement 1.0; voice turn 100 ms transcript→first token
+(prefill proxy), first TTS chunk 620 ms on Colab's network (204 ms on
+Kaggle's — measure yours); barge-in cancelled after the first chunk with one
+chunk synthesised. Streaming quality on 100 clips: `docs/EXPERIMENTS.md`,
+"Streaming evaluation".
+
+Two bugs the sweep found that unit tests against fakes had not: synthesis was
+eager (§4) and idle trimming deleted every utterance's onset (§2). Both are
+now pinned by tests that check *what audio and chunks actually flow*, not
+just state and labels.

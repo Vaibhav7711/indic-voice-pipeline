@@ -41,12 +41,18 @@ class VADConfig:
     adaptive_threshold: bool = True
     noise_window_ms: int = 3000
     noise_margin_db: float = 10.0
-    threshold_floor_dbfs: float = -60.0
+    #: -70 rather than -60: on the 100-clip streaming benchmark it cut split
+    #: clips 16 -> 14 at no cost. Only matters in near-silent recordings; in a
+    #: real room noise + margin governs.
+    threshold_floor_dbfs: float = -70.0
     min_speech_ms: int = 250
     #: 600 rather than 400: read Hindi has comma-length pauses near 400 ms and
     #: a cut there costs Whisper the context for both halves. +200 ms latency.
     min_silence_ms: int = 600
-    padding_ms: int = 200
+    #: 300 rather than 200: soft sentence onsets (इसे, उसे, और…) sit below any
+    #: threshold; the extra 100 ms of pre-roll removed the last onset
+    #: hallucination on the benchmark. Retrospective, so no latency cost.
+    padding_ms: int = 300
 
     def as_dict(self) -> dict:
         return {

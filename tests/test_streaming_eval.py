@@ -39,9 +39,9 @@ def _speech(seconds, dbfs=-30.0):
 
 def test_grid_names_resolve_and_default_is_untouched():
     assert vad_from_name("default").as_dict() == vad_from_name("default").as_dict()
-    assert vad_from_name("pad300").padding_ms == 300
+    assert vad_from_name("pad500").padding_ms == 500
     assert vad_from_name("fixed40").adaptive_threshold is False
-    assert set(VAD_GRID) >= {"default", "fixed40", "pad300", "floor70"}
+    assert set(VAD_GRID) >= {"default", "fixed40", "v1-adaptive", "pad500", "floor60"}
 
 
 def test_stream_clip_reports_one_final_and_full_vad_agreement():
@@ -51,7 +51,10 @@ def test_stream_clip_reports_one_final_and_full_vad_agreement():
     assert len(out["finals"]) == 1
     assert out["text"] == "नमस्ते दुनिया"
     assert out["vad_agreement"] is not None and out["vad_agreement"] > 0.95
-    assert out["first_final_start"] is not None and abs(out["first_final_start"]) <= 0.25
+    vad = vad_from_name("default")
+    pre_roll = (vad.padding_ms + vad.frame_ms) / 1000          # padded onset, one frame slack
+    assert out["first_final_start"] is not None
+    assert -pre_roll <= out["first_final_start"] <= 0.0
     assert t.calls == 1                       # partials disabled: one decode per final
 
 
