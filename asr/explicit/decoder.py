@@ -41,6 +41,29 @@ class WhisperDecoder:
         self.model = model
         self.device = device
         self.gen_config = model.generation_config
+        # generate() masks these before every argmax (SuppressTokensLogitsProcessor)
+        # and these only at the first generated position (…AtBegin). On clean
+        # speech the argmax never lands on them; on silence or noise it does,
+        # and the explicit loop must take the same path as the reference.
+        self._suppress = self._ids_tensor(getattr(self.gen_config, "suppress_tokens", None))
+        self._begin_suppress = self._ids_tensor(
+            getattr(self.gen_config, "begin_suppress_tokens", None),
+        )
+
+    def _ids_tensor(self, ids) -> torch.Tensor | None:
+        ids = [int(i) for i in (ids or [])]
+        return torch.tensor(ids, dtype=torch.long, device=self.device) if ids else None
+
+    def _pick(self, logits: torch.Tensor, *, at_begin: bool) -> torch.Tensor:
+        """Greedy token after the same suppression generate() applies. ``logits``
+        is (batch, vocab) for the last position."""
+        if self._suppress is not None or (at_begin and self._begin_suppress is not None):
+            logits = logits.clone()
+            if self._suppress is not None:
+                logits[:, self._suppress] = float("-inf")
+            if at_begin and self._begin_suppress is not None:
+                logits[:, self._begin_suppress] = float("-inf")
+        return logits.argmax(dim=-1, keepdim=True)
 
     def _language_token_ids(self) -> dict[str, int]:
         """``{"hi": 50276, ...}`` from the generation config, accepting either
@@ -191,7 +214,7 @@ class WhisperDecoder:
         end.record()
         end.synchronize()
 
-        next_token = outputs.logits[:, -1, :].argmax(dim=-1, keepdim=True)
+        next_token = self._pick(outputs.logits[:, -1, :], at_begin=True)
         state = DecoderState(
             past_key_values=outputs.past_key_values,
             encoder_outputs=encoder_outputs,
@@ -217,7 +240,7 @@ class WhisperDecoder:
         end.record()
         end.synchronize()
 
-        next_token = outputs.logits[:, -1, :].argmax(dim=-1, keepdim=True)
+        next_token = self._pick(outputs.logits[:, -1, :], at_begin=False)
         new_decoded = list(state.decoded_tokens)
 
         return DecoderState(

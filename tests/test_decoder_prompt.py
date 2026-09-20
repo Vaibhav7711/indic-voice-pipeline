@@ -100,3 +100,24 @@ def test_detect_language_candidates_restrict_the_argmax():
     assert prob > 0.9                        # softmax over {hi:0, en:4}
     with pytest.raises(ValueError, match="unknown Whisper language codes"):
         dec.detect_language(None, candidates=["hi", "xx"])
+
+
+def test_pick_applies_suppress_and_begin_suppress_like_generate():
+    dec = _decoder()
+    dec.gen_config.suppress_tokens = [7]
+    dec.gen_config.begin_suppress_tokens = [9]
+    dec = WhisperDecoder(dec.model, torch.device("cpu"))     # re-read config
+
+    logits = torch.zeros(1, VOCAB)
+    logits[0, 7] = 3.0      # always suppressed
+    logits[0, 9] = 2.0      # suppressed only at begin
+    logits[0, 11] = 1.0
+    assert dec._pick(logits, at_begin=True).item() == 11
+    assert dec._pick(logits, at_begin=False).item() == 9
+
+
+def test_pick_without_suppression_is_plain_argmax():
+    dec = _decoder()
+    logits = torch.zeros(1, VOCAB)
+    logits[0, 5] = 1.0
+    assert dec._pick(logits, at_begin=True).item() == 5

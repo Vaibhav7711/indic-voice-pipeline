@@ -161,13 +161,22 @@ def check_gpu_unit_tests():
     """The repo's own GPU tests: explicit loop vs generate(), LLM, pipeline."""
     proc = subprocess.run(
         [sys.executable, "-m", "pytest", "tests/test_asr.py", "tests/test_llm.py",
-         "tests/test_pipeline.py", "-q", "-rN", "-p", "no:cacheprovider"],
+         "tests/test_pipeline.py", "-q", "-rfE", "--tb=short", "-p", "no:cacheprovider",
+         "-W", "ignore"],
         capture_output=True, text=True,
     )
-    tail = proc.stdout.strip().splitlines()[-1] if proc.stdout.strip() else proc.stderr[-500:]
+    lines = proc.stdout.strip().splitlines()
+    summary = lines[-1] if lines else proc.stderr[-500:]
+    failures = [ln for ln in lines if ln.startswith(("FAILED", "ERROR"))]
     if proc.returncode != 0:
-        raise RuntimeError(f"pytest exit {proc.returncode}: {tail}\n{proc.stdout[-2000:]}")
-    return {"summary": tail}
+        # The short-summary lines carry the assertion; the traceback block is
+        # kept for the report but not for the one-line error.
+        tb_start = next((i for i, ln in enumerate(lines) if ln.startswith("=") and "FAILURES" in ln), 0)
+        raise RuntimeError(
+            f"pytest exit {proc.returncode}: {summary} | " + " ; ".join(failures)
+            + "\n" + "\n".join(lines[tb_start:tb_start + 60])
+        )
+    return {"summary": summary}
 
 
 def check_served_model_matches_generate(runner, loaded, clips):

@@ -366,10 +366,37 @@ Tesla T4, fp16, LoRA merged, explicit `ASRRunner`). Evidence:
 Decode dominates: ~124 tokens × ~20 ms ≈ 2.5 s of a 2.6 s utterance. The
 merged adapter costs ~3% latency.
 
-### Full pipeline waterfall
+### Full pipeline waterfall (whisper-medium + LoRA v1 → Qwen3-0.6B)
 
-Not yet measured with the v1 adapter. `benchmarks/pipeline_e2e.py --adapter …`
-produces it; the table will be filled from its JSON output, not by hand.
+From `scripts/gpu_validation.py` (`pipeline_waterfall`, mean of 3 runs after
+warm-up, one ~10 s FLEURS clip, 48-token LLM budget, T4, commit `ee2b7c3`).
+Evidence: `results/gpu_validation/report.json`.
+
+| Stage | Time |
+| --- | ---: |
+| Mel extraction | 7.7 ms |
+| Whisper encoder | 74.8 ms |
+| ASR decode | 1711 ms |
+| LLM prefill | 100 ms |
+| LLM decode (~47 tokens @ ~41 ms) | 1922 ms |
+| **Total pipeline** | **3885 ms** |
+| Audio → first LLM token | 1938 ms |
+| Peak VRAM | 2.9 GiB (concurrent strategy) |
+
+ASR decode and LLM decode are each ~45% of the turn; both are per-token
+sequential cost, which is why the agent path streams sentences to TTS rather
+than waiting for the whole answer.
+
+### Voice turn (final transcript → audio playing), same run
+
+| Segment | Time |
+| --- | ---: |
+| Final transcript → first LLM token (prefill proxy) | 86 ms |
+| First LLM token → playback start (edge-tts first chunk) | 204 ms |
+| **Response latency, excluding endpoint silence** | **291 ms** |
+
+The endpointer's `min_silence_ms` is added on top of this in a live session;
+see `docs/STREAMING.md` §5.
 
 ## Correctness policy
 
