@@ -520,3 +520,46 @@ class TestSessionLifecycle:
     def test_empty_push_is_a_no_op(self):
         session, _ = make_session()
         assert session.push(np.zeros(0, dtype=np.float32)) == []
+
+
+# ---------------------------------------------------------------------------
+# The audio handed to ASR must contain the padded onset (regression)
+# ---------------------------------------------------------------------------
+
+
+class _RecordingTranscriber(FakeTranscriber):
+    def __init__(self):
+        super().__init__()
+        self.audio: list[np.ndarray] = []
+
+    def transcribe_array(self, waveform, sample_rate, **kwargs):
+        self.audio.append(np.asarray(waveform))
+        return super().transcribe_array(waveform, sample_rate, **kwargs)
+
+
+class TestOnsetAudioIsPreserved:
+    def test_final_audio_starts_at_the_padded_onset_not_at_confirmation(self):
+        """Idle trimming used to discard audio up to 'now' on every push, so
+        when SPEECH_START arrived (min_speech_ms after the onset, pointing
+        padding_ms before it) the padded onset was already gone: every
+        utterance lost ~450 ms and Whisper hallucinated on the clipped word."""
+        fake = _RecordingTranscriber()
+        cfg = StreamingConfig(vad=vad_config(), emit_partials=False)
+        session = StreamingSession(fake, cfg, clock=lambda: 0.0)
+        wave = audio((0.5, 0.0), (2.0, 0.3), (1.0, 0.0))
+        updates = feed(session, wave, block=SR // 10)          # 100 ms blocks
+
+        final = finals(updates)[0]
+        assert len(fake.audio) == 1
+        got = fake.audio[0]
+        # Audio length matches the reported span, and the span starts where
+        # the endpointer said it does.
+        assert abs(len(got) / SR - final.audio_seconds) < 1e-6
+        expected_start = 0.5 - cfg.vad.padding_ms / 1000
+        assert abs(final.utterance_start_seconds - expected_start) <= cfg.vad.frame_ms / 1000
+        # The handed-over audio begins with the pre-speech silence and the
+        # tone starts exactly where it does in the stream — nothing was cut.
+        first_tone = int(np.flatnonzero(got != 0.0)[0])
+        assert abs(first_tone / SR - (0.5 - final.utterance_start_seconds)) < 1e-6
+        assert first_tone / SR >= cfg.vad.padding_ms / 1000 - 1e-6
+        assert np.sum(got != 0.0) == int(2.0 * SR)                 # whole tone present

@@ -36,3 +36,5 @@ results/streaming/*
 results/gpu_validation/*
 !results/gpu_validation/*.json
 !results/gpu_validation/*.md
+results/streaming_eval/**/*.wav
+results/streaming_eval/**/*.mp3

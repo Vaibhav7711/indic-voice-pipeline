@@ -163,7 +163,15 @@ They fail in different situations and neither covers the other. Set
 ### Memory and long utterances
 
 The buffer is trimmed as utterances finalize, so memory is bounded by
-`max_utterance_seconds` rather than session length. A speaker who never pauses
+`max_utterance_seconds` rather than session length. While idle, the trim keeps
+`min_speech_ms + padding_ms` (+ one frame) behind the cursor: the endpointer
+confirms an onset only after `min_speech_ms` of voiced audio and then reports
+a start `padding_ms` *earlier*, so that audio must still exist. Until
+2026-09-20 the idle trim discarded everything up to "now", and every final
+silently lost its first ~450 ms while its `utterance_start_seconds` label said
+otherwise. Whisper, given a word cut mid-vowel, hallucinated (`जी जी जी`). The
+unit tests missed it because the fake transcriber ignored audio content; one
+now records what it is handed. A speaker who never pauses
 hits `max_utterance_seconds` and gets a forced cut with
 `endpoint_reason="max_duration"` — bounded memory is worth an occasional
 awkward split.
@@ -326,6 +334,26 @@ session = StreamingSession(runner, StreamingConfig(language="hi"))
 The gaps that matter most, in order: a real `AudioSink` for actual audio output,
 a streaming LLM backend to replace the prefill proxy, and a local TTS engine to
 remove the network round trip from the critical path.
+
+### Measuring the streaming penalty
+
+`benchmarks/streaming_eval.py` streams a seeded FLEURS subset through the
+session (leading and trailing silence added, 100 ms blocks, audio-driven
+clock) and reports, per VAD configuration: WER vs reference, WER vs the
+*offline* decode of the same clip (the segmentation penalty alone), online
+vs offline VAD agreement, split/empty clips and onset hallucinations. The
+offline decode is shared across configs, so a grid of *k* configs costs
+`1 + k` decodes per clip.
+
+```bash
+python -m benchmarks.streaming_eval \
+    --adapter Hugme6969/whisper-medium-hindi-lora \
+    --split test --limit 100 --seed 0 \
+    --grid default,fixed40,pad300,floor70 \
+    --out-dir results/streaming_eval/medium-lora-test-100
+```
+
+Tune `VADConfig` from this, never from the two clips in the validation sweep.
 
 ### Validation status
 

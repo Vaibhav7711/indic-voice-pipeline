@@ -232,6 +232,14 @@ class StreamingSession:
         self.utterance_index = 0
 
         self._endpointer = StreamEndpointer(self.config.sample_rate, self.config.vad)
+
+        # Samples the idle trim must keep behind the cursor; see push().
+        vad = self.config.vad
+        self._onset_reserve = int(
+            self.config.sample_rate
+            * (vad.min_speech_ms + vad.padding_ms + vad.frame_ms + vad.hop_ms)
+            / 1000
+        )
         self._sequence = 0
 
         self._buffer = np.zeros(0, dtype=np.float32)
@@ -471,7 +479,13 @@ class StreamingSession:
             updates.extend(self._emit_partial())
 
         if self.state is SessionState.IDLE and not updates:
-            self._trim_buffer(self._endpointer.total_samples)
+            # Idle memory is bounded, but never trim what a future SPEECH_START
+            # can point back to: the endpointer confirms an onset only after
+            # min_speech_ms of voiced audio and then reports a start padded a
+            # further padding_ms earlier. Trimming to "now" deleted the first
+            # ~450 ms of every utterance and Whisper hallucinated on the
+            # clipped onset (the GPU sweep's "जी जी जी").
+            self._trim_buffer(self._endpointer.total_samples - self._onset_reserve)
 
         return updates
 

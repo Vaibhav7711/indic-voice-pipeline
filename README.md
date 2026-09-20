@@ -103,6 +103,7 @@ benchmarks/
     checkpoints.py    Checkpoint discovery, integrity checks, local staging
     asr_wer.py        Legacy single-number WER script (superseded by asr_eval)
     pipeline_e2e.py   Full waterfall benchmark
+    streaming_eval.py Streaming session vs offline decode over a seeded subset; VAD grid
 
 text/
     normalize.py      Hindi/Hinglish normalization ladder
@@ -127,6 +128,7 @@ tests/
     test_decoder_prompt.py  Whisper prompt grammar + language detection (CPU)
     test_llm_select.py      Repetition penalty (CPU only)
     test_training_config.py Training presets match the ledger (CPU only)
+    test_streaming_eval.py  Streaming benchmark plumbing (CPU only)
 
 notebooks/
     eval_colab.ipynb  End-to-end GPU evaluation workflow for Colab
