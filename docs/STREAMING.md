@@ -55,10 +55,23 @@ the reference implementation.
 
 | Rule | Purpose | Failure if wrong |
 | --- | --- | --- |
-| `threshold_dbfs` | Frame is speech if RMS ≥ threshold | Too low: fans and hum open utterances |
+| `threshold_dbfs` | Frame is always speech at or above this level (ceiling) | Too low: fans and hum open utterances |
+| `adaptive_threshold`, `noise_window_ms`, `noise_margin_db`, `threshold_floor_dbfs` | Below the ceiling, the bar is the sliding-window minimum level + margin, never under the floor | Off: quiet speakers get deleted (see below) |
 | `min_speech_ms` | Consecutive voiced frames to open an utterance | Too low: a cough invokes Whisper |
 | `min_silence_ms` | Silence that ends an utterance | Too low: users cut off mid-sentence |
 | `padding_ms` | Widen boundaries either side | Too low: clipped first consonant, last vowel |
+
+**Why the threshold adapts.** The first GPU validation sweep streamed two
+FLEURS clips whose levels differed by 13 dB (peaks −17 and −30 dBFS). A fixed
+−40 dBFS bar kept 69% of one and 17% of the other; the endpointer closed
+utterances mid-phrase and the audio in between was discarded before Whisper
+saw it (WER 52% vs 24.6% offline, D=11 of 20 errors). Inter-word gaps expose
+the noise floor even in continuous speech, so the minimum frame level over the
+last 3 s + 10 dB is a usable per-speaker threshold; the fixed value stays as a
+ceiling so loud audio and audio that starts mid-speech behave as before.
+`min_silence_ms` moved 400 → 600 for the same reason: read Hindi has
+comma-length pauses near 400 ms. The sweep now reports `wer_vs_offline` and
+per-clip coverage so a segmentation loss is never mistaken for a model error.
 
 Two details that are easy to get wrong:
 

@@ -20,7 +20,8 @@ knowing nothing about *t+1*, and you cannot revise it later.
 The decision rules, matched to the offline module
 -------------------------------------------------
 * **Frame energy** — RMS over a ``frame_ms`` window every ``hop_ms``, converted
-  to dBFS. Identical arithmetic to ``asr.vad``.
+  to dBFS, compared with the same causal :class:`asr.vad.AdaptiveThreshold`
+  the offline module uses (sliding-window noise floor plus margin).
 * **Speech onset** — ``min_speech_ms`` of *consecutive* voiced frames. This is
   what rejects a cough or a door slam: brief energy never accumulates enough
   consecutive frames to start an utterance.
@@ -51,7 +52,7 @@ from enum import Enum
 
 import numpy as np
 
-from asr.vad import VADConfig
+from asr.vad import AdaptiveThreshold, VADConfig, frame_dbfs
 
 __all__ = [
     "EndpointerState",
@@ -122,6 +123,8 @@ class StreamEndpointer:
         )
 
         self.state = EndpointerState.SILENCE
+        self._threshold = AdaptiveThreshold(config)
+        self.last_threshold_dbfs: float | None = None
         self._pending = np.zeros(0, dtype=np.float32)
         self._pending_origin = 0      # absolute sample index of _pending[0]
         self._frame_index = 0
@@ -184,9 +187,9 @@ class StreamEndpointer:
         return events
 
     def _consume_frame(self, window: np.ndarray) -> list[EndpointEvent]:
-        rms = np.sqrt(np.mean(np.square(window), dtype=np.float64))
-        dbfs = 20.0 * math.log10(max(float(rms), 1e-10))
-        voiced = dbfs >= self.config.threshold_dbfs
+        dbfs = frame_dbfs(window)
+        self.last_threshold_dbfs = self._threshold.update(dbfs)
+        voiced = dbfs >= self.last_threshold_dbfs
         index = self._frame_index
 
         if self.state is EndpointerState.SILENCE:

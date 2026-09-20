@@ -158,14 +158,7 @@ class StreamingConfig:
             "max_utterance_seconds": self.max_utterance_seconds,
             "long_form_threshold_seconds": self.long_form_threshold_seconds,
             "language": self.language,
-            "vad": {
-                "frame_ms": self.vad.frame_ms,
-                "hop_ms": self.vad.hop_ms,
-                "threshold_dbfs": self.vad.threshold_dbfs,
-                "min_speech_ms": self.vad.min_speech_ms,
-                "min_silence_ms": self.vad.min_silence_ms,
-                "padding_ms": self.vad.padding_ms,
-            },
+            "vad": self.vad.as_dict(),
         }
 
 

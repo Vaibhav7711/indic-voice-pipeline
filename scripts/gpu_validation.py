@@ -331,7 +331,13 @@ def check_long_form(runner, clips):
 
 
 def check_streaming_session(runner, clips):
-    """Real Whisper behind StreamingSession, microphone-sized blocks, audio clock."""
+    """Real Whisper behind StreamingSession, microphone-sized blocks, audio clock.
+
+    Reports three numbers so a bad result is attributable: WER against the
+    references (model + VAD), WER against the *offline* transcript of the
+    same audio (VAD/segmentation penalty only), and how much of each clip the
+    endpointer actually covered (audio deleted before Whisper saw it).
+    """
     from asr.explicit.mel import load_audio
     from asr.streaming import StreamingConfig, StreamingSession, UpdateKind
 
@@ -345,11 +351,17 @@ def check_streaming_session(runner, clips):
     config = StreamingConfig(language="hi", partial_interval_ms=1000, min_partial_audio_ms=1200)
     session = StreamingSession(runner, config, clock=clock)
 
-    parts, refs = [], []
+    gap = 1.0
+    parts, refs, offline, spans = [], [], [], []
+    cursor = 0.0
     for path, ref, _sec in clips[:2]:
         wav, _ = load_audio(str(path))
-        parts += [wav, np.zeros(16_000, dtype=np.float32)]  # 1 s silence between
+        seconds = len(wav) / 16_000
+        spans.append((path.name, cursor, cursor + seconds))
+        cursor += seconds + gap
+        parts += [wav, np.zeros(int(gap * 16_000), dtype=np.float32)]
         refs.append(ref)
+        offline.append(runner.transcribe_array(wav, 16_000, language="hi").text)
     audio = np.concatenate(parts)
 
     block = 1_600  # 100 ms
@@ -366,14 +378,34 @@ def check_streaming_session(runner, clips):
         raise AssertionError("streaming produced no final transcript")
     if not all(f.text.strip() for f in finals):
         raise AssertionError(f"empty final: {[f.as_dict() for f in finals]}")
+
+    # Fraction of each clip inside some final's audio span.
+    coverage = []
+    for name, c0, c1 in spans:
+        covered = 0.0
+        for f in finals:
+            f0, f1 = f.utterance_start_seconds, f.utterance_start_seconds + f.audio_seconds
+            covered += max(0.0, min(c1, f1) - max(c0, f0))
+        coverage.append({"clip": name, "covered_fraction": round(covered / (c1 - c0), 3)})
+
     joined = " ".join(f.text for f in finals)
-    return {
+    detail = {
         "utterances_expected": len(refs), "finals": len(finals), "partials": len(partials),
         "wer_vs_refs": word_error_rate(" ".join(refs), joined),
+        "wer_vs_offline": word_error_rate(" ".join(offline), joined),
+        "min_clip_coverage": min(c["covered_fraction"] for c in coverage),
         "final_asr_ms_mean": float(np.mean([f.asr_ms for f in finals])),
         "endpoint_reasons": [f.endpoint_reason.value for f in finals],
+        "coverage": coverage,
+        "offline_hypotheses": offline,
         "updates": [u.as_dict() for u in updates],
     }
+    if detail["min_clip_coverage"] < 0.8:
+        raise AssertionError(
+            f"endpointer deleted speech: coverage {coverage}; "
+            f"wer_vs_offline={detail['wer_vs_offline']:.1f}%"
+        )
+    return detail
 
 
 def check_llm_prompt_and_decoding(pipe, transcript: str):
