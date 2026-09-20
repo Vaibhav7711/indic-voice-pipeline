@@ -340,6 +340,7 @@ def check_streaming_session(runner, clips):
     """
     from asr.explicit.mel import load_audio
     from asr.streaming import StreamingConfig, StreamingSession, UpdateKind
+    from asr.vad import detect_speech
 
     class AudioClock:
         now = 0.0
@@ -379,30 +380,50 @@ def check_streaming_session(runner, clips):
     if not all(f.text.strip() for f in finals):
         raise AssertionError(f"empty final: {[f.as_dict() for f in finals]}")
 
-    # Fraction of each clip inside some final's audio span.
-    coverage = []
-    for name, c0, c1 in spans:
-        covered = 0.0
-        for f in finals:
-            f0, f1 = f.utterance_start_seconds, f.utterance_start_seconds + f.audio_seconds
-            covered += max(0.0, min(c1, f1) - max(c0, f0))
-        coverage.append({"clip": name, "covered_fraction": round(covered / (c1 - c0), 3)})
+    final_spans = [(f.utterance_start_seconds, f.utterance_start_seconds + f.audio_seconds)
+                   for f in finals]
+
+    def overlap(a0, a1):
+        return sum(max(0.0, min(a1, f1) - max(a0, f0)) for f0, f1 in final_spans)
+
+    # Informational: fraction of each *clip* inside a final. Clips carry their
+    # own leading/trailing silence, so this cannot reach 1.0.
+    coverage = [{"clip": name, "covered_fraction": round(overlap(c0, c1) / (c1 - c0), 3)}
+                for name, c0, c1 in spans]
+
+    # The real test: the online endpointer against the offline detector on the
+    # same audio with the same rules. They should agree almost exactly.
+    offline_segments = detect_speech(audio, 16_000, config.vad)
+    offline_speech = sum(s.duration_seconds for s in offline_segments)
+    agreed = sum(overlap(s.start_seconds, s.end_seconds) for s in offline_segments)
+    online_vs_offline_vad = round(agreed / offline_speech, 3) if offline_speech else None
 
     joined = " ".join(f.text for f in finals)
     detail = {
         "utterances_expected": len(refs), "finals": len(finals), "partials": len(partials),
         "wer_vs_refs": word_error_rate(" ".join(refs), joined),
         "wer_vs_offline": word_error_rate(" ".join(offline), joined),
+        "online_vs_offline_vad": online_vs_offline_vad,
+        "offline_vad_segments": len(offline_segments),
         "min_clip_coverage": min(c["covered_fraction"] for c in coverage),
         "final_asr_ms_mean": float(np.mean([f.asr_ms for f in finals])),
         "endpoint_reasons": [f.endpoint_reason.value for f in finals],
+        "finals_detail": [
+            {"start": round(f.utterance_start_seconds, 2), "seconds": round(f.audio_seconds, 2),
+             "reason": f.endpoint_reason.value, "text": f.text} for f in finals
+        ],
+        "offline_vad_detail": [
+            {"start": round(s.start_seconds, 2), "end": round(s.end_seconds, 2)}
+            for s in offline_segments
+        ],
         "coverage": coverage,
         "offline_hypotheses": offline,
         "updates": [u.as_dict() for u in updates],
     }
-    if detail["min_clip_coverage"] < 0.8:
+    if online_vs_offline_vad is not None and online_vs_offline_vad < 0.9:
         raise AssertionError(
-            f"endpointer deleted speech: coverage {coverage}; "
+            f"online endpointer covers only {online_vs_offline_vad:.0%} of offline-VAD speech; "
+            f"finals={detail['finals_detail']} offline={detail['offline_vad_detail']} "
             f"wer_vs_offline={detail['wer_vs_offline']:.1f}%"
         )
     return detail
