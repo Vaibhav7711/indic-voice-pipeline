@@ -109,7 +109,8 @@ def run_model(model_name: str, prompts: list[str], *, max_new_tokens: int,
     from tts.streaming import SentenceBuffer
 
     t0 = time.perf_counter()
-    loaded = load_llm(model_name, dtype=getattr(torch, dtype))
+    loaded = load_llm(model_name, dtype=None if dtype == "auto" else getattr(torch, dtype))
+    dtype = str(loaded.dtype).replace("torch.", "")
     load_s = time.perf_counter() - t0
     runner = LLMRunner(loaded.model, loaded.tokenizer, loaded.device)
     params = sum(p.numel() for p in loaded.model.parameters())
@@ -174,7 +175,8 @@ def main(argv: list[str] | None = None) -> int:
                         help="Comma-separated Hub ids, evaluated in order")
     parser.add_argument("--prompts", default=None, help="JSON list file; default: built-in 12")
     parser.add_argument("--max-new-tokens", type=int, default=96)
-    parser.add_argument("--dtype", default="bfloat16", choices=["bfloat16", "float16"])
+    parser.add_argument("--dtype", default="auto", choices=["auto", "bfloat16", "float16"],
+                        help="auto: bf16 where native, else fp16 (T4 has no bf16)")
     parser.add_argument("--language", default="hi")
     parser.add_argument("--out-dir", required=True)
     args = parser.parse_args(argv)
