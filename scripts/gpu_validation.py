@@ -407,10 +407,15 @@ def check_streaming_session(runner, clips):
         "offline_vad_segments": len(offline_segments),
         "min_clip_coverage": min(c["covered_fraction"] for c in coverage),
         "final_asr_ms_mean": float(np.mean([f.asr_ms for f in finals])),
+        "asr_after_endpoint_ms_mean": float(np.mean([f.asr_ms_after_endpoint for f in finals])),
+        "finals_from_candidate": sum(1 for f in finals if f.from_candidate),
+        "candidates": sum(1 for u in updates if u.kind == UpdateKind.CANDIDATE),
         "endpoint_reasons": [f.endpoint_reason.value for f in finals],
         "finals_detail": [
             {"start": round(f.utterance_start_seconds, 2), "seconds": round(f.audio_seconds, 2),
-             "reason": f.endpoint_reason.value, "text": f.text} for f in finals
+             "reason": f.endpoint_reason.value, "from_candidate": f.from_candidate,
+             "asr_ms_after_endpoint": round(f.asr_ms_after_endpoint, 1), "text": f.text}
+            for f in finals
         ],
         "offline_vad_detail": [
             {"start": round(s.start_seconds, 2), "end": round(s.end_seconds, 2)}

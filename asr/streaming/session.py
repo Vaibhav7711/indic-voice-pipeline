@@ -68,10 +68,12 @@ from typing import Any, Protocol
 
 import numpy as np
 
+from asr.explicit.chunking import merge_overlapping_transcripts
 from asr.streaming.endpointer import (
     EndpointEventKind,
     StreamEndpointer,
 )
+from asr.streaming.policy import EndpointPolicy
 from asr.vad import VADConfig
 
 __all__ = [
@@ -96,6 +98,9 @@ class SessionState(str, Enum):
 class UpdateKind(str, Enum):
     STATE = "state"
     PARTIAL = "partial"
+    #: A full decode taken during the silence wait; becomes the final
+    #: unchanged if no more speech arrives. Display it like a partial.
+    CANDIDATE = "candidate"
     FINAL = "final"
 
 
@@ -148,6 +153,23 @@ class StreamingConfig:
     chunk_seconds: float = 25.0
     overlap_seconds: float = 5.0
 
+    #: Decode a *candidate* final once this much trailing silence has passed
+    #: (must be under ``vad.min_silence_ms``). If the endpointer then closes
+    #: the utterance at the same sample, the candidate is committed without a
+    #: second decode: the ASR work happens inside the silence wait instead of
+    #: after it. Lossless — the same audio would have been decoded. 0 disables.
+    early_final_silence_ms: int = 300
+    #: Decode only the audio since the last partial (plus overlap) for
+    #: candidates/finals and stitch onto the partial's text. Changes the
+    #: output (a partial's prefix is committed), so off until the streaming
+    #: benchmark says the penalty is acceptable.
+    incremental_finals: bool = False
+    incremental_overlap_seconds: float = 2.0
+    #: Let the candidate transcript lengthen the silence wait when the phrase
+    #: is unfinished (see asr/streaming/policy.py). Off until measured.
+    semantic_endpointing: bool = False
+    endpoint_policy: EndpointPolicy = field(default_factory=EndpointPolicy)
+
     def as_dict(self) -> dict:
         return {
             "sample_rate": self.sample_rate,
@@ -158,6 +180,11 @@ class StreamingConfig:
             "max_utterance_seconds": self.max_utterance_seconds,
             "long_form_threshold_seconds": self.long_form_threshold_seconds,
             "language": self.language,
+            "early_final_silence_ms": self.early_final_silence_ms,
+            "incremental_finals": self.incremental_finals,
+            "incremental_overlap_seconds": self.incremental_overlap_seconds,
+            "semantic_endpointing": self.semantic_endpointing,
+            "endpoint_policy": self.endpoint_policy.as_dict(),
             "vad": self.vad.as_dict(),
         }
 
@@ -188,6 +215,15 @@ class StreamUpdate:
     long_form: bool = False
     #: True when a partial covered only the tail of a longer utterance.
     partial_is_tail: bool = False
+    #: Final committed from a candidate — no ASR ran after the endpoint.
+    from_candidate: bool = False
+    #: ASR time spent *after* the endpoint fired. The latency the user
+    #: feels; ``asr_ms`` is the total compute behind this text.
+    asr_ms_after_endpoint: float = 0.0
+    #: Seconds of audio actually sent to the model for this update.
+    decoded_seconds: float = 0.0
+    #: Text was stitched onto an earlier partial (incremental decode).
+    reused_partial: bool = False
 
     def as_dict(self) -> dict:
         return {
@@ -208,6 +244,10 @@ class StreamUpdate:
             "real_time_factor": round(self.real_time_factor, 4),
             "long_form": self.long_form,
             "partial_is_tail": self.partial_is_tail,
+            "from_candidate": self.from_candidate,
+            "asr_ms_after_endpoint": round(self.asr_ms_after_endpoint, 3),
+            "decoded_seconds": round(self.decoded_seconds, 3),
+            "reused_partial": self.reused_partial,
         }
 
 
@@ -248,6 +288,14 @@ class StreamingSession:
 
         self._last_partial_samples = 0
         self._last_partial_time = 0.0
+        # Text already decoded for the current utterance and how far it
+        # reaches (absolute sample); feeds incremental decoding.
+        self._partial_state: dict | None = None
+        # Candidate final decoded during the silence wait; keyed by the
+        # endpointer's last voiced frame so resumed speech invalidates it.
+        self._candidate: dict | None = None
+        if self.config.early_final_silence_ms >= self.config.vad.min_silence_ms:
+            raise ValueError("early_final_silence_ms must be below vad.min_silence_ms")
 
     # -- introspection ----------------------------------------------------
 
@@ -293,6 +341,13 @@ class StreamingSession:
         if stop <= start:
             return np.zeros(0, dtype=np.float32)
         return self._buffer[max(0, start) : stop]
+
+    def _audio_range(self, start_abs: int, end_abs: int) -> np.ndarray:
+        start = max(0, start_abs - self._buffer_origin)
+        stop = min(self._buffer.size, end_abs - self._buffer_origin)
+        if stop <= start:
+            return np.zeros(0, dtype=np.float32)
+        return self._buffer[start:stop]
 
     def _trim_buffer(self, keep_from_absolute: int) -> None:
         offset = keep_from_absolute - self._buffer_origin
@@ -363,9 +418,12 @@ class StreamingSession:
         if is_tail:
             audio = audio[-window:]
 
+        covered_end = (self._utterance_start or 0) + self._utterance_audio().size
         result = self._run_asr(audio, long_form=False)
         self._last_partial_samples = self._endpointer.total_samples
         self._last_partial_time = self._clock()
+        text = getattr(result, "text", "") or ""
+        self._partial_state = {"end": covered_end, "text": text, "is_tail": is_tail}
 
         seconds = audio.size / rate
         asr_ms = self._asr_ms(result)
@@ -389,20 +447,108 @@ class StreamingSession:
             )
         ]
 
+    def _decode_utterance(self, end_sample: int) -> dict:
+        """Transcribe the current utterance up to ``end_sample``.
+
+        Full decode by default. With ``incremental_finals`` and a usable
+        partial (covers the utterance from its start, not a tail), only the
+        audio since that partial minus an overlap is decoded and stitched
+        onto the partial's text with the long-form overlap merge.
+        """
+        rate = self.config.sample_rate
+        start = self._utterance_start or 0
+        audio = self._utterance_audio(end_sample)
+        seconds = audio.size / rate
+        long_form = seconds > self.config.long_form_threshold_seconds
+        out = {"text": "", "asr_ms": 0.0, "long_form": long_form,
+               "seconds": seconds, "decoded_seconds": 0.0, "reused_partial": False}
+        if not audio.size:
+            return out
+
+        partial = self._partial_state
+        usable = (
+            self.config.incremental_finals and partial is not None
+            and not partial["is_tail"] and not long_form
+            and partial["end"] > start
+        )
+        if usable:
+            # A partial decoded during the silence wait may reach past
+            # end_sample; either way the last ``overlap`` seconds before the
+            # end are re-decoded so the merge can fix the seam.
+            overlap = int(self.config.incremental_overlap_seconds * rate)
+            tail_start = max(start, min(partial["end"], end_sample) - overlap)
+            tail = self._audio_range(tail_start, end_sample)
+            result = self._run_asr(tail, long_form=False)
+            tail_text = getattr(result, "text", "") or ""
+            out["text"] = merge_overlapping_transcripts(partial["text"], tail_text)
+            out["decoded_seconds"] = tail.size / rate
+            out["reused_partial"] = True
+        else:
+            result = self._run_asr(audio, long_form=long_form)
+            out["text"] = getattr(result, "text", "") or ""
+            out["decoded_seconds"] = seconds
+        out["asr_ms"] = self._asr_ms(result)
+        if not long_form:
+            self._partial_state = {"end": end_sample, "text": out["text"], "is_tail": False}
+        return out
+
+    def _maybe_candidate(self) -> list[StreamUpdate]:
+        """Decode a candidate final once the silence wait is under way."""
+        early = self.config.early_final_silence_ms
+        if early <= 0 or self.state is not SessionState.SPEAKING:
+            return []
+        ep = self._endpointer
+        if self._candidate is not None and self._candidate["frame"] != ep.last_voiced_frame:
+            self._candidate = None                       # speech resumed
+        if self._candidate is not None or ep.silence_ms < early:
+            return []
+
+        end = ep.projected_end_sample()
+        decoded = self._decode_utterance(end)
+        self._candidate = {"frame": ep.last_voiced_frame, "end": end, **decoded}
+        self._last_partial_samples = ep.total_samples
+        self._last_partial_time = self._clock()
+        if self.config.semantic_endpointing:
+            ep.set_endpoint_silence_ms(
+                self.config.endpoint_policy.required_silence_ms(decoded["text"])
+            )
+        rate = self.config.sample_rate
+        return [
+            StreamUpdate(
+                kind=UpdateKind.CANDIDATE,
+                sequence=self._next_sequence(),
+                session_id=self.session_id,
+                state=self.state,
+                utterance_index=self.utterance_index,
+                text=decoded["text"],
+                is_final=False,
+                audio_seconds=decoded["seconds"],
+                stream_seconds=self.stream_seconds,
+                utterance_start_seconds=(self._utterance_start or 0) / rate,
+                asr_ms=decoded["asr_ms"],
+                real_time_factor=(
+                    decoded["asr_ms"] / 1000.0 / decoded["seconds"] if decoded["seconds"] else 0.0
+                ),
+                long_form=decoded["long_form"],
+                decoded_seconds=decoded["decoded_seconds"],
+                reused_partial=decoded["reused_partial"],
+            )
+        ]
+
     def _finalize(
         self, end_sample: int, reason: EndpointReason
     ) -> list[StreamUpdate]:
         rate = self.config.sample_rate
-        audio = self._utterance_audio(end_sample)
         start_seconds = (self._utterance_start or 0) / rate
-        seconds = audio.size / rate
-        long_form = seconds > self.config.long_form_threshold_seconds
 
-        text, asr_ms = "", 0.0
-        if audio.size:
-            result = self._run_asr(audio, long_form=long_form)
-            text = getattr(result, "text", "") or ""
-            asr_ms = self._asr_ms(result)
+        cand = self._candidate
+        if cand is not None and cand["end"] == end_sample:
+            decoded, from_candidate, after = cand, True, 0.0
+        else:
+            decoded = self._decode_utterance(end_sample)
+            from_candidate, after = False, decoded["asr_ms"]
+        text, asr_ms = decoded["text"], decoded["asr_ms"]
+        seconds, long_form = decoded["seconds"], decoded["long_form"]
 
         update = StreamUpdate(
             kind=UpdateKind.FINAL,
@@ -419,10 +565,16 @@ class StreamingSession:
             asr_ms=asr_ms,
             real_time_factor=(asr_ms / 1000.0 / seconds) if seconds else 0.0,
             long_form=long_form,
+            from_candidate=from_candidate,
+            asr_ms_after_endpoint=after,
+            decoded_seconds=decoded["decoded_seconds"],
+            reused_partial=decoded["reused_partial"],
         )
 
         self.utterance_index += 1
         self._utterance_start = None
+        self._partial_state = None
+        self._candidate = None
         self._last_partial_samples = self._endpointer.total_samples
         self._last_partial_time = self._clock()
         self._trim_buffer(end_sample)
@@ -475,6 +627,7 @@ class StreamingSession:
             updates.append(self._state_update(SessionState.IDLE))
             return updates
 
+        updates.extend(self._maybe_candidate())
         if self._should_emit_partial():
             updates.extend(self._emit_partial())
 

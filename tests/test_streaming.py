@@ -563,3 +563,211 @@ class TestOnsetAudioIsPreserved:
         assert abs(first_tone / SR - (0.5 - final.utterance_start_seconds)) < 1e-6
         assert first_tone / SR >= cfg.vad.padding_ms / 1000 - 1e-6
         assert np.sum(got != 0.0) == int(2.0 * SR)                 # whole tone present
+
+
+# ---------------------------------------------------------------------------
+# Candidate finals: ASR inside the silence wait
+# ---------------------------------------------------------------------------
+
+
+def candidates(updates):
+    return [u for u in updates if u.kind is UpdateKind.CANDIDATE]
+
+
+class _TextByLengthTranscriber(FakeTranscriber):
+    """Text that depends on the audio it saw, so reuse is observable."""
+
+    def __init__(self):
+        super().__init__()
+        self.audio_seconds: list[float] = []
+
+    def _result(self, seconds: float, tag: str):
+        self.audio_seconds.append(seconds)
+        return types.SimpleNamespace(
+            text=f"शब्द{len(self.audio_seconds)} len={seconds:.2f}",
+            metrics=types.SimpleNamespace(total_ms=self.asr_ms),
+        )
+
+
+class TestCandidateFinals:
+    def test_candidate_is_decoded_during_silence_and_final_reuses_it(self):
+        fake = _TextByLengthTranscriber()
+        session, _ = make_session(fake, early_final_silence_ms=200)
+        # vad_config(): min_silence_ms=400. Silence after speech = 1.0 s.
+        updates = feed(session, audio((0.4, 0.0), (2.0, 0.3), (1.0, 0.0)))
+
+        cands, fins = candidates(updates), finals(updates)
+        assert len(cands) == 1 and len(fins) == 1
+        assert fake.total_calls == 1, "final must not decode again"
+        assert fins[0].from_candidate is True
+        assert fins[0].text == cands[0].text
+        assert fins[0].asr_ms_after_endpoint == 0.0
+        assert fins[0].asr_ms == cands[0].asr_ms > 0
+        # The candidate saw exactly the audio the final reports.
+        assert abs(cands[0].audio_seconds - fins[0].audio_seconds) < 1e-6
+        assert cands[0].sequence < fins[0].sequence
+
+    def test_candidate_is_discarded_when_speech_resumes(self):
+        fake = _TextByLengthTranscriber()
+        session, _ = make_session(fake, early_final_silence_ms=200)
+        # 0.3 s pause: candidate fires at 0.2 s, but the pause is under
+        # min_silence (0.4 s) so speech "resumes" and the utterance continues.
+        updates = feed(session, audio((0.4, 0.0), (1.0, 0.3), (0.3, 0.0), (1.0, 0.3), (1.0, 0.0)))
+
+        cands, fins = candidates(updates), finals(updates)
+        assert len(fins) == 1
+        assert len(cands) == 2, "one per silence run"
+        assert fake.total_calls == 2
+        assert fins[0].from_candidate is True
+        assert fins[0].text == cands[-1].text
+        assert fins[0].text != cands[0].text
+        assert fins[0].audio_seconds > cands[0].audio_seconds
+
+    def test_flush_reuses_the_candidate(self):
+        fake = _TextByLengthTranscriber()
+        session, _ = make_session(fake, early_final_silence_ms=200)
+        updates = feed(session, audio((0.4, 0.0), (2.0, 0.3), (0.3, 0.0)))  # < min_silence
+        assert finals(updates) == [] and len(candidates(updates)) == 1
+        flushed = session.flush()
+        fin = finals(flushed)[0]
+        assert fin.from_candidate is True
+        assert fin.endpoint_reason.value == "stream_flush"
+        assert fake.total_calls == 1
+
+    def test_disabled_candidates_decode_after_endpoint(self):
+        fake = _TextByLengthTranscriber()
+        session, _ = make_session(fake, early_final_silence_ms=0)
+        updates = feed(session, audio((0.4, 0.0), (2.0, 0.3), (1.0, 0.0)))
+        assert candidates(updates) == []
+        fin = finals(updates)[0]
+        assert fin.from_candidate is False
+        assert fin.asr_ms_after_endpoint == fin.asr_ms > 0
+
+    def test_early_must_be_below_min_silence(self):
+        with pytest.raises(ValueError, match="early_final_silence_ms"):
+            make_session(early_final_silence_ms=400)      # == vad min_silence_ms
+
+    def test_max_duration_cut_does_not_use_a_stale_candidate(self):
+        fake = _TextByLengthTranscriber()
+        session, _ = make_session(fake, early_final_silence_ms=200, max_utterance_seconds=3.0)
+        updates = feed(session, audio((0.4, 0.0), (5.0, 0.3), (1.0, 0.0)))
+        fins = finals(updates)
+        assert fins[0].endpoint_reason.value == "max_duration"
+        assert fins[0].from_candidate is False
+
+
+class TestIncrementalFinals:
+    def test_final_decodes_only_the_tail_and_stitches_onto_partial(self):
+        fake = _TextByLengthTranscriber()
+        session, _ = make_session(
+            fake, emit_partials=True, partial_interval_ms=1, min_partial_audio_ms=500,
+            early_final_silence_ms=0, incremental_finals=True,
+            incremental_overlap_seconds=1.0, clock=advancing_clock(1.0),
+        )
+        updates = feed(session, audio((0.4, 0.0), (4.0, 0.3), (1.0, 0.0)))
+        parts, fin = partials(updates), finals(updates)[0]
+        assert parts, "needs at least one partial to reuse"
+        assert fin.reused_partial is True
+        assert fin.text.startswith(parts[-1].text), "partial prefix is committed"
+        # Tail = the 1 s overlap plus any audio the last partial had not seen
+        # (here none: the last partial ran during the trailing silence).
+        new_audio = max(0.0, fin.audio_seconds - parts[-1].audio_seconds)
+        assert fin.decoded_seconds < fin.audio_seconds
+        assert 1.0 - 0.05 <= fin.decoded_seconds <= new_audio + 1.0 + 0.05
+        assert abs(fake.audio_seconds[-1] - fin.decoded_seconds) < 1e-6
+
+    def test_incremental_off_decodes_everything(self):
+        fake = _TextByLengthTranscriber()
+        session, _ = make_session(
+            fake, emit_partials=True, partial_interval_ms=1, min_partial_audio_ms=500,
+            early_final_silence_ms=0, incremental_finals=False, clock=advancing_clock(1.0),
+        )
+        fin = finals(feed(session, audio((0.4, 0.0), (4.0, 0.3), (1.0, 0.0))))[0]
+        assert fin.reused_partial is False
+        assert abs(fin.decoded_seconds - fin.audio_seconds) < 1e-6
+
+    def test_candidate_after_partial_is_incremental_and_final_reuses_it(self):
+        fake = _TextByLengthTranscriber()
+        session, _ = make_session(
+            fake, emit_partials=True, partial_interval_ms=1, min_partial_audio_ms=500,
+            early_final_silence_ms=200, incremental_finals=True,
+            incremental_overlap_seconds=1.0, clock=advancing_clock(1.0),
+        )
+        updates = feed(session, audio((0.4, 0.0), (4.0, 0.3), (1.0, 0.0)))
+        cand, fin = candidates(updates)[0], finals(updates)[0]
+        assert cand.reused_partial is True and cand.decoded_seconds < cand.audio_seconds
+        assert fin.from_candidate and fin.asr_ms_after_endpoint == 0.0
+        assert fin.text == cand.text
+
+    def test_tail_partial_is_not_reused(self):
+        """A partial that covered only the tail cannot be a prefix."""
+        fake = _TextByLengthTranscriber()
+        session, _ = make_session(
+            fake, emit_partials=True, partial_interval_ms=1, min_partial_audio_ms=500,
+            partial_window_seconds=2.0, long_form_threshold_seconds=100.0,
+            early_final_silence_ms=0, incremental_finals=True, clock=advancing_clock(1.0),
+        )
+        fin = finals(feed(session, audio((0.4, 0.0), (5.0, 0.3), (1.0, 0.0))))[0]
+        assert fin.reused_partial is False
+
+
+class TestSemanticEndpointing:
+    class _Incomplete(FakeTranscriber):
+        def _result(self, seconds, tag):
+            return types.SimpleNamespace(
+                text="मैं बाज़ार के", metrics=types.SimpleNamespace(total_ms=1.0),
+            )
+
+    class _Complete(FakeTranscriber):
+        def _result(self, seconds, tag):
+            return types.SimpleNamespace(
+                text="मैं ठीक हूँ।", metrics=types.SimpleNamespace(total_ms=1.0),
+            )
+
+    def _run(self, transcriber, *, semantic):
+        from asr.streaming import EndpointPolicy
+
+        session, _ = make_session(
+            transcriber, early_final_silence_ms=200, semantic_endpointing=semantic,
+            endpoint_policy=EndpointPolicy(incomplete_silence_ms=1000),
+        )
+        # Pause of 0.7 s: over min_silence (0.4) but under the incomplete wait (1.0).
+        wave = audio((0.4, 0.0), (1.0, 0.3), (0.7, 0.0), (1.0, 0.3), (1.2, 0.0))
+        return finals(feed(session, wave))
+
+    def test_incomplete_phrase_waits_longer_and_avoids_the_split(self):
+        assert len(self._run(self._Incomplete(), semantic=False)) == 2
+        assert len(self._run(self._Incomplete(), semantic=True)) == 1
+
+    def test_complete_phrase_keeps_the_default_wait(self):
+        assert len(self._run(self._Complete(), semantic=True)) == 2
+
+    def test_policy_resets_for_the_next_utterance(self):
+        fins = self._run(self._Incomplete(), semantic=True)
+        assert fins[0].endpoint_reason.value == "silence"
+        # After closing, a following utterance with a 0.7 s pause must be
+        # split again unless its own candidate says incomplete — here the
+        # transcriber always says incomplete, so check the endpointer reset.
+        from asr.streaming import EndpointPolicy
+
+        session, _ = make_session(
+            self._Complete(), early_final_silence_ms=200, semantic_endpointing=True,
+            endpoint_policy=EndpointPolicy(incomplete_silence_ms=1000),
+        )
+        assert session._endpointer.endpoint_silence_frames == \
+            session._endpointer.default_endpoint_silence_frames
+
+
+class TestPhraseIsIncomplete:
+    def test_rules(self):
+        from asr.streaming import phrase_is_incomplete
+
+        assert phrase_is_incomplete("मैं बाज़ार के")
+        assert phrase_is_incomplete("मुझे लगता है कि")
+        assert phrase_is_incomplete("यह बहुत अच्छा है और")
+        assert phrase_is_incomplete("I want to go to the")
+        assert not phrase_is_incomplete("मैं ठीक हूँ")
+        assert not phrase_is_incomplete("मैं बाज़ार के।")      # terminator wins
+        assert not phrase_is_incomplete("क्या आप आएंगे?")
+        assert not phrase_is_incomplete("")
+        assert not phrase_is_incomplete("और।")

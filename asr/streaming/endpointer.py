@@ -118,9 +118,13 @@ class StreamEndpointer:
         )
         # Offline merges gaps of floor(min_silence_ms / hop_ms) frames or fewer
         # as intra-utterance pauses, so an endpoint needs one frame more.
-        self.endpoint_silence_frames = (
+        self.default_endpoint_silence_frames = (
             math.floor(config.min_silence_ms / config.hop_ms) + 1
         )
+        # May be raised for the current utterance by a semantic endpoint
+        # policy ("the transcript so far ends mid-phrase; wait longer").
+        # Reset to the default whenever an utterance closes.
+        self.endpoint_silence_frames = self.default_endpoint_silence_frames
 
         self.state = EndpointerState.SILENCE
         self._threshold = AdaptiveThreshold(config)
@@ -147,6 +151,36 @@ class StreamEndpointer:
     @property
     def stream_seconds(self) -> float:
         return self._total_samples / self.sample_rate
+
+    @property
+    def silence_ms(self) -> float:
+        """Trailing silence inside the current utterance, 0 outside one."""
+        if self.state is not EndpointerState.SPEECH:
+            return 0.0
+        return self._silence_run * self.config.hop_ms
+
+    @property
+    def last_voiced_frame(self) -> int:
+        return self._last_voiced_frame
+
+    def projected_end_sample(self) -> int:
+        """Where the utterance will end if no more speech arrives — the same
+        sample :meth:`_close_utterance` will report. Lets the session decode a
+        candidate final during the silence wait and commit it unchanged."""
+        return min(
+            self._total_samples,
+            self._frame_start_sample(self._last_voiced_frame)
+            + self.frame_samples
+            + self.padding_samples,
+        )
+
+    def set_endpoint_silence_ms(self, silence_ms: int | None) -> None:
+        """Override the silence needed to close the *current* utterance.
+        ``None`` restores the configured default."""
+        if silence_ms is None:
+            self.endpoint_silence_frames = self.default_endpoint_silence_frames
+        else:
+            self.endpoint_silence_frames = math.floor(silence_ms / self.config.hop_ms) + 1
 
     # -- main entry point -------------------------------------------------
 
@@ -231,15 +265,11 @@ class StreamEndpointer:
         return []
 
     def _close_utterance(self) -> EndpointEvent:
-        end = min(
-            self._total_samples,
-            self._frame_start_sample(self._last_voiced_frame)
-            + self.frame_samples
-            + self.padding_samples,
-        )
+        end = self.projected_end_sample()
         self.state = EndpointerState.SILENCE
         self._voiced_run = 0
         self._silence_run = 0
+        self.endpoint_silence_frames = self.default_endpoint_silence_frames
         return EndpointEvent(
             EndpointEventKind.SPEECH_END, end, self._last_voiced_frame
         )
@@ -260,6 +290,7 @@ class StreamEndpointer:
         self.state = EndpointerState.SILENCE
         self._voiced_run = 0
         self._silence_run = 0
+        self.endpoint_silence_frames = self.default_endpoint_silence_frames
 
     def as_dict(self) -> dict:
         return {

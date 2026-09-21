@@ -15,6 +15,7 @@ from asr.streaming.endpointer import (
     EndpointEventKind,
     StreamEndpointer,
 )
+from asr.streaming.policy import EndpointPolicy, phrase_is_incomplete
 from asr.streaming.session import (
     EndpointReason,
     SessionState,
@@ -26,6 +27,8 @@ from asr.streaming.session import (
 )
 
 __all__ = [
+    "EndpointPolicy",
+    "phrase_is_incomplete",
     "StreamEndpointer",
     "EndpointerState",
     "EndpointEvent",

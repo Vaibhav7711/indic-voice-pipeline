@@ -124,7 +124,7 @@ serializes to JSONL for debugging:
 
 | Field | Meaning |
 | --- | --- |
-| `kind` | `state`, `partial`, `final` |
+| `kind` | `state`, `partial`, `candidate`, `final` |
 | `sequence` | Monotonic within the session |
 | `text`, `is_final` | Only `is_final=True` is committed |
 | `endpoint_reason` | `silence`, `max_duration`, `stream_flush` |
@@ -132,6 +132,9 @@ serializes to JSONL for debugging:
 | `asr_ms`, `real_time_factor` | Timing for this update |
 | `long_form` | Final routed through chunk-and-stitch |
 | `partial_is_tail` | Partial covered only the tail of a longer utterance |
+| `from_candidate` | Final committed from a candidate; no ASR after the endpoint |
+| `asr_ms_after_endpoint` | ASR time the user actually waited for |
+| `decoded_seconds`, `reused_partial` | How much audio went to the model; incremental stitch used |
 
 ### Partials are approximate by construction
 
@@ -159,6 +162,45 @@ Both must clear before a partial runs:
 
 They fail in different situations and neither covers the other. Set
 `partial_interval_ms=0` or `emit_partials=False` to disable partials entirely.
+
+### Finals during the silence wait (candidates)
+
+The endpointer needs `min_silence_ms` (600 ms) of quiet before it will commit
+an utterance. That wait used to be dead time, and the full-utterance decode
+(1–2.7 s on whisper-medium) started only after it. Now, once
+`early_final_silence_ms` (300 ms) of silence has passed, the session decodes
+the utterance up to `projected_end_sample()` — the exact sample the endpointer
+will close at if no more speech arrives — and emits it as a
+`kind="candidate"` update. When the endpoint fires at that same sample the
+candidate becomes the final with **no further ASR**; `from_candidate=True`
+and `asr_ms_after_endpoint=0`. If speech resumes, the candidate is dropped.
+This is lossless: the same audio would have been decoded anyway, just later.
+
+> **LLM analogy.** Speculative decoding: do the work before you are sure it
+> is needed, keep it if the verifier agrees, discard it if not.
+
+`asr_ms` on a final is the compute behind its text; `asr_ms_after_endpoint`
+is what the user waited for. Report the second.
+
+### Incremental finals (off by default)
+
+With `incremental_finals=True`, candidates and finals decode only the last
+`incremental_overlap_seconds` (2 s) plus whatever the last partial had not
+seen, and stitch the result onto the partial's text with the long-form
+overlap merge. The decode shrinks from ~120 tokens to ~20. It changes the
+output — a partial's prefix is committed — so it stays off until
+`benchmarks/streaming_eval.py --session-grid early,early-incr` says the
+penalty (`WER off`) is acceptable. `reused_partial=True` marks such finals.
+
+### Semantic endpointing (off by default)
+
+`asr/streaming/policy.py`: if the candidate transcript ends in a postposition,
+conjunction or other token that never ends a Hindi phrase (`… के`, `… और`,
+`… कि`), the endpointer's required silence for *this* utterance is raised to
+`incomplete_silence_ms` (1000 ms). It only ever lengthens the wait, so a wrong
+rule costs latency, never a cut-off user. Targets the 16% of read-speech clips
+the energy rule splits at a comma. Enable with `semantic_endpointing=True`;
+measure splits with the benchmark's `early-sem` / `full` session configs.
 
 ### Memory and long utterances
 

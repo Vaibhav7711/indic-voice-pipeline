@@ -92,3 +92,34 @@ def test_aggregate_separates_model_error_from_streaming_penalty():
     assert m["structure"]["clips_with_one_final"] == 1
     assert m["structure"]["endpoint_reasons"] == {"silence": 3}
     assert m["structure"]["vad_agreement_mean"] == 0.9
+
+
+def test_session_grid_early_reuses_candidate_and_reports_zero_asr_after_endpoint():
+    from benchmarks.streaming_eval import session_kwargs
+
+    t = _Transcriber()
+    out = stream_clip(t, _speech(2.0), vad_from_name("default"), language="hi",
+                      lead=0.5, trail=1.0, session=session_kwargs("early"))
+    assert out["candidates"] == 1 and len(out["finals"]) == 1
+    assert out["finals_from_candidate"] == 1
+    assert out["asr_ms_after_endpoint"] == 0.0
+    assert out["asr_ms_total"] == 5.0                       # the candidate's decode
+    # end→final = the 600 ms silence wait only (no ASR after the endpoint).
+    assert 600.0 <= out["endpoint_to_final_ms_last"] <= 600.0 + 130.0   # + frame + one 100 ms block
+
+
+def test_session_grid_baseline_pays_asr_after_endpoint():
+    from benchmarks.streaming_eval import session_kwargs
+
+    out = stream_clip(_Transcriber(), _speech(2.0), vad_from_name("default"), language="hi",
+                      lead=0.5, trail=1.0, session=session_kwargs("baseline"))
+    assert out["candidates"] == 0
+    assert out["asr_ms_after_endpoint"] == 5.0
+    assert 605.0 <= out["endpoint_to_final_ms_last"] <= 605.0 + 130.0
+
+
+def test_session_grid_names():
+    from benchmarks.streaming_eval import SESSION_GRID, session_kwargs
+
+    assert {"baseline", "early", "early-incr", "early-sem", "full"} <= set(SESSION_GRID)
+    assert session_kwargs("full")["incremental_finals"] and session_kwargs("full")["semantic_endpointing"]

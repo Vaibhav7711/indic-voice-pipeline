@@ -71,6 +71,34 @@ VAD_GRID: dict[str, dict] = {
 }
 
 
+#: Session-level variants: how the final transcript is produced.
+#:   baseline    decode the whole utterance after the endpoint (pre-5.3)
+#:   early       candidate decode at 300 ms of silence, committed at 600 ms
+#:   early-incr  + partials every ~1.2 s and only the tail re-decoded
+#:   early-sem   early + semantic endpoint policy (wait longer mid-phrase)
+#:   full        early-incr + semantic
+SESSION_GRID: dict[str, dict] = {
+    "baseline": {"early_final_silence_ms": 0, "incremental_finals": False,
+                 "semantic_endpointing": False, "emit_partials": False},
+    "early": {"early_final_silence_ms": 300, "incremental_finals": False,
+              "semantic_endpointing": False, "emit_partials": False},
+    "early-incr": {"early_final_silence_ms": 300, "incremental_finals": True,
+                   "semantic_endpointing": False, "emit_partials": True,
+                   "partial_interval_ms": 0, "min_partial_audio_ms": 1200},
+    "early-sem": {"early_final_silence_ms": 300, "incremental_finals": False,
+                  "semantic_endpointing": True, "emit_partials": False},
+    "full": {"early_final_silence_ms": 300, "incremental_finals": True,
+             "semantic_endpointing": True, "emit_partials": True,
+             "partial_interval_ms": 0, "min_partial_audio_ms": 1200},
+}
+
+
+def session_kwargs(name: str) -> dict:
+    if name not in SESSION_GRID:
+        raise SystemExit(f"unknown session config {name!r}; choose from {sorted(SESSION_GRID)}")
+    return dict(SESSION_GRID[name])
+
+
 def vad_from_name(name: str) -> VADConfig:
     if name not in VAD_GRID:
         raise SystemExit(f"unknown VAD config {name!r}; choose from {sorted(VAD_GRID)}")
@@ -91,8 +119,15 @@ class _AudioClock:
 
 
 def stream_clip(runner, waveform: np.ndarray, vad: VADConfig, *, language: str,
-                lead: float, trail: float, block_ms: int = 100) -> dict:
-    """Stream one clip through a fresh session; return finals and geometry."""
+                lead: float, trail: float, block_ms: int = 100,
+                session: dict | None = None) -> dict:
+    """Stream one clip through a fresh session; return finals and geometry.
+
+    With the audio-driven clock, ASR compute does not advance stream time, so
+    "speech end → final" is reconstructed as the silence the endpointer
+    waited plus the ASR that ran *after* the endpoint. Compute that ran
+    during the wait (a candidate) is not on that path.
+    """
     from asr.streaming import StreamingConfig, StreamingSession, UpdateKind
     from asr.vad import detect_speech
 
@@ -101,7 +136,8 @@ def stream_clip(runner, waveform: np.ndarray, vad: VADConfig, *, language: str,
         waveform.astype(np.float32),
         np.zeros(int(trail * SR), dtype=np.float32),
     ])
-    config = StreamingConfig(language=language, vad=vad, emit_partials=False)
+    session_opts = {"emit_partials": False, **(session or {})}
+    config = StreamingConfig(language=language, vad=vad, **session_opts)
     clock = _AudioClock()
     session = StreamingSession(runner, config, clock=clock)
     block = SR * block_ms // 1000
@@ -112,9 +148,28 @@ def stream_clip(runner, waveform: np.ndarray, vad: VADConfig, *, language: str,
         updates.extend(session.push(chunk))
     updates.extend(session.flush())
     finals = [u for u in updates if u.kind == UpdateKind.FINAL]
+    n_partials = sum(1 for u in updates if u.kind == UpdateKind.PARTIAL)
+    n_candidates = sum(1 for u in updates if u.kind == UpdateKind.CANDIDATE)
 
     spans = [(f.utterance_start_seconds, f.utterance_start_seconds + f.audio_seconds)
              for f in finals]
+    # Per final: silence the endpointer waited + ASR after the endpoint.
+    # audio_seconds includes the trailing padding, so speech ended
+    # padding_ms before the utterance's audio does.
+    endpoint_to_final_ms = [
+        max(0.0, (f.stream_seconds - (f.utterance_start_seconds + f.audio_seconds)) * 1000
+            + vad.padding_ms) + f.asr_ms_after_endpoint
+        for f in finals
+    ]
+    # Total ASR compute for the clip: finals (a final from a candidate carries
+    # the candidate's time), plus partials, plus candidates that were wasted.
+    candidate_ms = sum(u.asr_ms for u in updates if u.kind == UpdateKind.CANDIDATE)
+    committed_candidate_ms = sum(f.asr_ms for f in finals if f.from_candidate)
+    asr_ms_total = (
+        sum(f.asr_ms for f in finals)
+        + sum(u.asr_ms for u in updates if u.kind == UpdateKind.PARTIAL)
+        + max(0.0, candidate_ms - committed_candidate_ms)
+    )
     offline_segments = detect_speech(audio, SR, vad)
     offline_speech = sum(s.duration_seconds for s in offline_segments)
     agreed = sum(
@@ -127,10 +182,20 @@ def stream_clip(runner, waveform: np.ndarray, vad: VADConfig, *, language: str,
             {"start": round(f.utterance_start_seconds - clip_start, 3),
              "seconds": round(f.audio_seconds, 3),
              "reason": f.endpoint_reason.value if f.endpoint_reason else None,
-             "asr_ms": round(f.asr_ms, 1), "text": f.text}
+             "asr_ms": round(f.asr_ms, 1),
+             "asr_ms_after_endpoint": round(f.asr_ms_after_endpoint, 1),
+             "from_candidate": f.from_candidate, "reused_partial": f.reused_partial,
+             "decoded_seconds": round(f.decoded_seconds, 3), "text": f.text}
             for f in finals
         ],
         "text": " ".join(f.text for f in finals).strip(),
+        "partials": n_partials, "candidates": n_candidates,
+        "asr_ms_after_endpoint": round(sum(f.asr_ms_after_endpoint for f in finals), 1),
+        "asr_ms_total": round(asr_ms_total, 1),
+        "endpoint_to_final_ms_last": round(endpoint_to_final_ms[-1], 1) if finals else None,
+        "finals_from_candidate": sum(1 for f in finals if f.from_candidate),
+        "finals_reused_partial": sum(1 for f in finals if f.reused_partial),
+        "decoded_seconds": round(sum(f.decoded_seconds for f in finals), 3),
         "vad_agreement": round(agreed / offline_speech, 4) if offline_speech else None,
         "offline_vad_segments": len(offline_segments),
         "first_final_start": round(spans[0][0] - clip_start, 3) if spans else None,
@@ -191,8 +256,22 @@ def aggregate(rows: list[dict], level: str) -> dict:
         "latency": {
             "streamed_asr_ms_mean": round(float(np.mean([r["streamed_asr_ms"] for r in rows])), 1),
             "offline_asr_ms_mean": round(float(np.mean([r["offline_asr_ms"] for r in rows])), 1),
+            # What the user waits for after they stop talking, for the last
+            # final of each clip: silence wait + ASR after the endpoint.
+            "endpoint_to_final_ms_mean": _mean_of(rows, "endpoint_to_final_ms_last"),
+            "asr_after_endpoint_ms_mean": _mean_of(rows, "asr_ms_after_endpoint"),
+            "asr_total_ms_mean": _mean_of(rows, "asr_ms_total"),
+            "decoded_seconds_mean": _mean_of(rows, "decoded_seconds"),
+            "finals_from_candidate": sum(r.get("finals_from_candidate", 0) for r in rows),
+            "finals_reused_partial": sum(r.get("finals_reused_partial", 0) for r in rows),
+            "partials_total": sum(r.get("partials", 0) for r in rows),
         },
     }
+
+
+def _mean_of(rows: list[dict], key: str):
+    vals = [r[key] for r in rows if r.get(key) is not None]
+    return round(float(np.mean(vals)), 1) if vals else None
 
 
 def _count(items) -> dict:
@@ -219,6 +298,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--sample", default="random", choices=["random", "first"])
     parser.add_argument("--grid", default="default",
                         help="Comma-separated VAD configs; see VAD_GRID")
+    parser.add_argument("--session-grid", default="baseline",
+                        help="Comma-separated session configs; see SESSION_GRID")
     parser.add_argument("--lead", type=float, default=0.5, help="Leading silence (s)")
     parser.add_argument("--trail", type=float, default=1.0, help="Trailing silence (s)")
     parser.add_argument("--level", default="standard")
@@ -239,8 +320,21 @@ def main(argv: list[str] | None = None) -> int:
     )
     from benchmarks.fleurs import load_fleurs
 
-    names = [n.strip() for n in args.grid.split(",") if n.strip()]
-    grid = {name: vad_from_name(name) for name in names}
+    vad_names = [n.strip() for n in args.grid.split(",") if n.strip()]
+    sess_names = [n.strip() for n in args.session_grid.split(",") if n.strip()]
+    # Cartesian product; a run name is "<vad>+<session>" unless one side is
+    # a single default, in which case the other side's name is used alone.
+    grid: dict[str, tuple[VADConfig, dict]] = {}
+    for v in vad_names:
+        for sname in sess_names:
+            if len(sess_names) == 1 and sname == "baseline":
+                key = v
+            elif len(vad_names) == 1 and v == "default":
+                key = sname
+            else:
+                key = f"{v}+{sname}"
+            grid[key] = (vad_from_name(v), session_kwargs(sname))
+    names = list(grid)
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -251,7 +345,7 @@ def main(argv: list[str] | None = None) -> int:
         "selection": {"source": "fleurs", "config": args.config, "split": args.split,
                       "strategy": args.sample, "seed": args.seed, "limit": args.limit,
                       "available": len(dataset), "indices": indices},
-        "grid": {name: cfg.as_dict() for name, cfg in grid.items()},
+        "grid": {name: {"vad": vad.as_dict(), "session": sess} for name, (vad, sess) in grid.items()},
         "lead_seconds": args.lead, "trail_seconds": args.trail, "level": args.level,
         "dtype": args.dtype, "note": args.note, "provenance": provenance(),
     })
@@ -270,9 +364,9 @@ def main(argv: list[str] | None = None) -> int:
                                             ex["sampling_rate"])
         # One offline decode per clip, shared by every config.
         offline = runner.transcribe_array(waveform, SR, language=args.language)
-        for name, vad in grid.items():
+        for name, (vad, sess) in grid.items():
             streamed = stream_clip(runner, waveform, vad, language=args.language,
-                                   lead=args.lead, trail=args.trail)
+                                   lead=args.lead, trail=args.trail, session=sess)
             per_config[name].append({
                 "id": ex["id"], "audio_ref": ex["audio_ref"],
                 "audio_seconds": round(len(waveform) / SR, 3),
@@ -281,6 +375,13 @@ def main(argv: list[str] | None = None) -> int:
                 "offline_asr_ms": round(offline.metrics.total_ms, 1),
                 "streamed_text": streamed["text"],
                 "streamed_asr_ms": streamed["streamed_asr_ms"],
+                "partials": streamed["partials"], "candidates": streamed["candidates"],
+                "asr_ms_after_endpoint": streamed["asr_ms_after_endpoint"],
+                "asr_ms_total": streamed["asr_ms_total"],
+                "endpoint_to_final_ms_last": streamed["endpoint_to_final_ms_last"],
+                "finals_from_candidate": streamed["finals_from_candidate"],
+                "finals_reused_partial": streamed["finals_reused_partial"],
+                "decoded_seconds": streamed["decoded_seconds"],
                 "n_finals": len(streamed["finals"]),
                 "finals": streamed["finals"],
                 "endpoint_reasons": [f["reason"] for f in streamed["finals"]],
@@ -298,7 +399,8 @@ def main(argv: list[str] | None = None) -> int:
         cfg_dir.mkdir(exist_ok=True)
         write_jsonl(cfg_dir / "clips.jsonl", rows)
         metrics = aggregate(rows, args.level)
-        metrics["vad"] = grid[name].as_dict()
+        metrics["vad"] = grid[name][0].as_dict()
+        metrics["session"] = grid[name][1]
         write_json(cfg_dir / "metrics.json", metrics)
         summary[name] = {
             "wer_vs_reference": metrics["wer_vs_reference"]["micro_percent"],
@@ -308,6 +410,9 @@ def main(argv: list[str] | None = None) -> int:
             "clips_empty": metrics["structure"]["clips_empty"],
             "onset_hallucinations": metrics["structure"]["onset_hallucinations"],
             "vad_agreement_mean": metrics["structure"]["vad_agreement_mean"],
+            "endpoint_to_final_ms": metrics["latency"]["endpoint_to_final_ms_mean"],
+            "asr_after_endpoint_ms": metrics["latency"]["asr_after_endpoint_ms_mean"],
+            "asr_total_ms": metrics["latency"]["asr_total_ms_mean"],
         }
     offline_wer = aggregate(per_config[names[0]], args.level)["offline_wer_vs_reference"]
     write_json(out_dir / "summary.json", {
@@ -315,14 +420,15 @@ def main(argv: list[str] | None = None) -> int:
     })
 
     print(f"\noffline WER vs reference: {offline_wer['micro_percent']:.2f}%\n")
-    header = f"{'config':16s} {'WER ref':>8s} {'WER off':>8s} {'penalty':>8s} " \
-             f"{'split':>5s} {'empty':>5s} {'onset':>5s} {'agree':>6s}"
+    header = f"{'config':22s} {'WER ref':>8s} {'WER off':>8s} {'penalty':>8s} " \
+             f"{'split':>5s} {'empty':>5s} {'onset':>5s} {'end→final':>10s} {'asr after':>9s} {'asr total':>9s}"
     print(header)
     for name, row in summary.items():
-        print(f"{name:16s} {row['wer_vs_reference']:8.2f} {row['wer_vs_offline']:8.2f} "
+        print(f"{name:22s} {row['wer_vs_reference']:8.2f} {row['wer_vs_offline']:8.2f} "
               f"{row['streaming_penalty_points']:+8.2f} {row['clips_split']:5d} "
               f"{row['clips_empty']:5d} {row['onset_hallucinations']:5d} "
-              f"{row['vad_agreement_mean']:6.3f}")
+              f"{row['endpoint_to_final_ms'] or 0:10.0f} {row['asr_after_endpoint_ms'] or 0:9.0f} "
+              f"{row['asr_total_ms'] or 0:9.0f}")
     print(f"\nwritten: {out_dir}")
     return 0
 
