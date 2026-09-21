@@ -104,6 +104,7 @@ benchmarks/
     asr_wer.py        Legacy single-number WER script (superseded by asr_eval)
     pipeline_e2e.py   Full waterfall benchmark
     streaming_eval.py Streaming session vs offline decode over a seeded subset; VAD grid
+    llm_bakeoff.py    Candidate LLMs: Hindi quality proxies + time-to-first-sentence
 
 text/
     normalize.py      Hindi/Hinglish normalization ladder

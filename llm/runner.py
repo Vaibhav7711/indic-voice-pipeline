@@ -111,7 +111,7 @@ class LLMRunner:
         # if it still happens, and the metrics say when it fired.
         self.repetition_penalty = repetition_penalty
         self.loop_guard_ngram = loop_guard_ngram
-        #: Metrics of the most recent generate()/stream() call.
+        #: Metrics of the most recent (or in-progress) generate()/stream() call.
         self.last_metrics: LLMMetrics | None = None
 
         eos = tokenizer.eos_token_id
@@ -146,6 +146,8 @@ class LLMRunner:
         """
         total_start = perf_counter_ns()
         _reset_peak(self.device)
+        # Visible while streaming, so a consumer can read live counts.
+        self.last_metrics = metrics
 
         inputs = self.tokenizer(prompt, return_tensors="pt").to(self.device)
         input_ids = inputs["input_ids"]
