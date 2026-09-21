@@ -251,6 +251,43 @@ Consequences:
   labels match the serving prompt. The next training run should verify
   unrestricted detection returns `hi` before it is promoted.
 
+### Base-model decision for v2 (2026-09-21)
+
+`openai/whisper-large-v3-turbo`, no adapter, on the same seed-0 300-clip
+subset as the v1 evaluation (Tesla T4, fp16, `standard` normalization).
+Evidence: `results/eval/turbo-base-test-300-seed0/` (run from Colab at
+commit `e0daacb`; to be committed with the next evidence drop).
+
+| Model | WER | CER | p50 latency | RTF |
+| --- | ---: | ---: | ---: | ---: |
+| whisper-medium base | 40.43% | 16.74% | 2461 ms | 0.230 |
+| whisper-medium + LoRA v1 | 25.82% | 9.61% | 2540 ms | 0.238 |
+| **large-v3-turbo base** | 30.40% | 11.55% | **1238 ms** | **0.117** |
+
+Turbo base: raw 34.56% / orthography-blind 28.58% (formatting cost 4.2 pts —
+punctuation and Latin digits the references do not use; fine-tuning on FLEURS
+references removes this). Categories: other 57.5%, rare_word 19.1%,
+function_word 9.7%, orthographic 5.7%, **deletion_run 2.8% (63)**, code_switch
+2.8%, numeric 2.3%; one repetition-loop flag.
+
+**Decision: v2 trains on large-v3-turbo** (`--preset v2-turbo`). Base turbo
+is 10 points better than base medium at half the latency, and the v1 recipe's
+gain on medium (−14.6 pts) transferring even at a conservative 25% relative
+puts v2 at ~22–23%, beating v1 while halving the largest term in the agent's
+response delay. Full large-v3 was rejected: same encoder, 32 decoder layers,
+~4× turbo's decode cost — the wrong trade for a voice agent.
+
+Everything else is held at v1 (data mix, rank 16, 2×4, 200-step checkpoints)
+so the comparison isolates the base model. The label prefix now includes
+`<|hi|><|transcribe|>`; that is a correctness fix (see "Known v1
+limitation"), not a tuning change.
+
+**Success criteria, fixed before training:** test WER ≤ 22.0% and CER ≤ 8.5%
+on the seed-0 300 subset; unrestricted language detection returns `hi` in the
+GPU sweep; p50 ASR latency ≤ 1.35 s; `deletion_run` not above base turbo's 63.
+Rank (32) and data-mix (10k IndicVoices) ablations follow only after v2 is
+recorded against these.
+
 ### Streaming evaluation (2026-09-21)
 
 `benchmarks/streaming_eval.py`, Hindi LoRA v1, 100 seeded FLEURS-hi test clips

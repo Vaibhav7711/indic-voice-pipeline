@@ -26,6 +26,15 @@ def test_v1_preset_matches_experiments_ledger():
     assert (c.save_steps, c.save_total_limit, c.epochs) == (200, 3, 3)
 
 
+def test_v2_turbo_differs_from_v1_only_in_base_model():
+    v1, v2 = _config("--preset", "v1"), _config("--preset", "v2-turbo")
+    assert v2.model_name == "openai/whisper-large-v3-turbo"
+    for field in ("dataset", "language", "indicvoices_samples", "epochs", "batch_size",
+                  "gradient_accumulation_steps", "lora_rank", "lora_alpha", "lora_dropout",
+                  "target_modules", "eval_steps", "save_steps", "save_total_limit"):
+        assert getattr(v1, field) == getattr(v2, field), field
+
+
 def test_flags_override_preset():
     c = _config("--preset", "v1", "--indicvoices-samples", "0", "--epochs", "1",
                 "--output-dir", "/tmp/x")

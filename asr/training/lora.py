@@ -90,6 +90,27 @@ PRESETS: dict[str, dict] = {
         save_steps=200,
         save_total_limit=3,
     ),
+    # v2: identical recipe to v1, base model swapped to large-v3-turbo (v3's
+    # 32-layer encoder, 4-layer decoder: ~2x faster decode than medium and a
+    # better Hindi starting point — 30.4% vs 40.4% base WER on the ledger's
+    # 300-clip subset). Labels carry <|hi|><|transcribe|> so language
+    # detection survives fine-tuning. One variable changed on purpose.
+    "v2-turbo": dict(
+        model_name="openai/whisper-large-v3-turbo",
+        dataset="fleurs",
+        language="hi",
+        indicvoices_samples=5000,
+        epochs=3,
+        batch_size=2,
+        gradient_accumulation_steps=4,
+        lora_rank=16,
+        lora_alpha=32,
+        lora_dropout=0.05,
+        target_modules=["q_proj", "k_proj", "v_proj", "out_proj"],
+        eval_steps=200,
+        save_steps=200,
+        save_total_limit=3,
+    ),
     # The superseded whisper-small run kept under results/whisper-lora-hi-full.
     "small-fleurs": dict(
         model_name="openai/whisper-small",
