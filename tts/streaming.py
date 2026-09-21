@@ -258,7 +258,11 @@ class EdgeStreamingSynthesizer:
         *,
         max_buffered_chunks: int = 32,
     ):
+        from agent.audio import MP3_24K
         from tts.synthesis import DEFAULT_VOICES
+
+        #: edge-tts emits 24 kHz mono MP3 frames.
+        self.format = MP3_24K
 
         self.language = language
         self.voice = voice or DEFAULT_VOICES.get(language, DEFAULT_VOICES[None])

@@ -455,6 +455,35 @@ def check_llm_prompt_and_decoding(pipe, transcript: str):
     }
 
 
+def check_llm_compiled_matches_eager(pipe, transcript: str):
+    """Static cache + CUDA-graph decode must produce the eager tokens, and
+    should be faster per token. Reports both so the gain is measured."""
+    from llm import LLMRunner
+
+    prompt = pipe._build_prompt(transcript, "hi")
+    eager = pipe.llm_runner
+    fast = LLMRunner(pipe.llm.model, pipe.llm.tokenizer, pipe.llm.device,
+                     repetition_penalty=eager.repetition_penalty,
+                     static_cache=True, compile_decode=True, max_cache_len=1024)
+    a = eager.generate(prompt, max_new_tokens=64)
+    fast.generate(prompt, max_new_tokens=8)                  # compile / graph capture
+    b = fast.generate(prompt, max_new_tokens=64)
+    c = fast.generate(prompt, max_new_tokens=64)             # steady state
+    detail = {
+        "tokens_match": a.token_ids == b.token_ids == c.token_ids,
+        "eager_ms_per_token": a.metrics.mean_decode_ms,
+        "compiled_ms_per_token": c.metrics.mean_decode_ms,
+        "speedup": (a.metrics.mean_decode_ms / c.metrics.mean_decode_ms
+                    if c.metrics.mean_decode_ms else None),
+        "eager_prefill_ms": a.metrics.prefill_ms, "compiled_prefill_ms": c.metrics.prefill_ms,
+        "generated_tokens": a.metrics.generated_tokens,
+        "eager_text": a.text, "compiled_text": c.text,
+    }
+    if not detail["tokens_match"]:
+        raise AssertionError(f"compiled decode diverges from eager: {detail}")
+    return detail
+
+
 def check_pipeline_waterfall(pipe, clips):
     import torch
 
@@ -638,6 +667,8 @@ def main() -> int:
     transcript = hi[0][1]
 
     report.run("llm_prompt_and_decoding", lambda: check_llm_prompt_and_decoding(pipe, transcript))
+    report.run("llm_compiled_matches_eager",
+               lambda: check_llm_compiled_matches_eager(pipe, transcript))
     report.run("pipeline_waterfall", lambda: check_pipeline_waterfall(pipe, hi))
     net = "--skip-network" if args.skip_network else None
     report.run("voice_turn_real_tts", lambda: check_voice_turn(pipe.llm_runner, transcript),

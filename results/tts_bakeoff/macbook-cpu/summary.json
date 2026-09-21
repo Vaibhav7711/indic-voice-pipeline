@@ -1,0 +1,136 @@
+{
+  "backends": {
+    "edge": {
+      "backend": "edge",
+      "format": {
+        "codec": "mp3",
+        "sample_rate": 24000,
+        "channels": 1
+      },
+      "streaming": true,
+      "warm_up_ms": null,
+      "first_chunk_ms_p50": 1234.0,
+      "total_ms_mean": 1744.3,
+      "rtf_mean": 0.305,
+      "rows": [
+        {
+          "sentence": "नमस्ते, मैं आपकी क्या मदद कर सकती हूँ?",
+          "first_chunk_ms": 1146.2,
+          "total_ms": 1468.5,
+          "audio_seconds": 4.44,
+          "rtf": 0.331,
+          "wav": "results/tts_bakeoff/macbook-cpu/edge_0.wav"
+        },
+        {
+          "sentence": "दिल्ली से मुंबई जाने का सबसे तेज़ तरीका हवाई जहाज़ है, जिसमें लगभग दो घंटे लगते हैं।",
+          "first_chunk_ms": 1234.0,
+          "total_ms": 1647.4,
+          "audio_seconds": 7.66,
+          "rtf": 0.215,
+          "wav": "results/tts_bakeoff/macbook-cpu/edge_1.wav"
+        },
+        {
+          "sentence": "आपका laptop slow होने की सबसे आम वजह पुराना software और भरी हुई disk होती है।",
+          "first_chunk_ms": 1362.3,
+          "total_ms": 1894.1,
+          "audio_seconds": 7.18,
+          "rtf": 0.264,
+          "wav": "results/tts_bakeoff/macbook-cpu/edge_2.wav"
+        },
+        {
+          "sentence": "एक किलो चावल में लगभग तीन हज़ार छह सौ कैलोरी होती है।",
+          "first_chunk_ms": 1839.2,
+          "total_ms": 2323.1,
+          "audio_seconds": 5.35,
+          "rtf": 0.434,
+          "wav": "results/tts_bakeoff/macbook-cpu/edge_3.wav"
+        },
+        {
+          "sentence": "ठीक है, मैंने कल सुबह छह बजे का alarm लगा दिया है।",
+          "first_chunk_ms": 1078.8,
+          "total_ms": 1388.4,
+          "audio_seconds": 4.94,
+          "rtf": 0.281,
+          "wav": "results/tts_bakeoff/macbook-cpu/edge_4.wav"
+        }
+      ]
+    },
+    "mms": {
+      "backend": "mms",
+      "format": {
+        "codec": "pcm_s16le",
+        "sample_rate": 16000,
+        "channels": 1
+      },
+      "streaming": false,
+      "warm_up_ms": 692.593042,
+      "first_chunk_ms_p50": 1714.0,
+      "total_ms_mean": 1839.9599999999998,
+      "rtf_mean": 0.3794,
+      "rows": [
+        {
+          "sentence": "नमस्ते, मैं आपकी क्या मदद कर सकती हूँ?",
+          "first_chunk_ms": 1088.6,
+          "total_ms": 1089.0,
+          "audio_seconds": 3.58,
+          "rtf": 0.304,
+          "wav": "results/tts_bakeoff/macbook-cpu/mms_0.wav"
+        },
+        {
+          "sentence": "दिल्ली से मुंबई जाने का सबसे तेज़ तरीका हवाई जहाज़ है, जिसमें लगभग दो घंटे लगते हैं।",
+          "first_chunk_ms": 2836.1,
+          "total_ms": 2836.6,
+          "audio_seconds": 6.34,
+          "rtf": 0.448,
+          "wav": "results/tts_bakeoff/macbook-cpu/mms_1.wav"
+        },
+        {
+          "sentence": "आपका laptop slow होने की सबसे आम वजह पुराना software और भरी हुई disk होती है।",
+          "first_chunk_ms": 2258.7,
+          "total_ms": 2258.8,
+          "audio_seconds": 5.2,
+          "rtf": 0.434,
+          "wav": "results/tts_bakeoff/macbook-cpu/mms_2.wav"
+        },
+        {
+          "sentence": "एक किलो चावल में लगभग तीन हज़ार छह सौ कैलोरी होती है।",
+          "first_chunk_ms": 1300.6,
+          "total_ms": 1301.2,
+          "audio_seconds": 4.4,
+          "rtf": 0.296,
+          "wav": "results/tts_bakeoff/macbook-cpu/mms_3.wav"
+        },
+        {
+          "sentence": "ठीक है, मैंने कल सुबह छह बजे का alarm लगा दिया है।",
+          "first_chunk_ms": 1714.0,
+          "total_ms": 1714.2,
+          "audio_seconds": 4.13,
+          "rtf": 0.415,
+          "wav": "results/tts_bakeoff/macbook-cpu/mms_4.wav"
+        }
+      ]
+    }
+  },
+  "provenance": {
+    "timestamp_utc": "2026-09-21T06:43:35.234679+00:00",
+    "git_commit": "ec636eb99a040de2dfd57f632bf28819afe3f20c",
+    "git_branch": "main",
+    "git_dirty": true,
+    "argv": [
+      "/Users/vaibhavjain/indic-voice-pipeline/benchmarks/tts_bakeoff.py",
+      "--backends",
+      "edge,mms",
+      "--out-dir",
+      "results/tts_bakeoff/macbook-cpu"
+    ],
+    "packages": {
+      "python": "3.12.1",
+      "torch": "2.10.0",
+      "transformers": "5.2.0",
+      "peft": null,
+      "datasets": null,
+      "numpy": "2.4.2"
+    },
+    "platform": "macOS-15.0-arm64-arm-64bit"
+  }
+}

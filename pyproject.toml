@@ -27,7 +27,9 @@ dependencies = [
 
 [project.optional-dependencies]
 demo = ["gradio>=4.0"]
-dev = ["pytest>=8.0", "ruff>=0.6"]
+# Real audio output (device playback, MP3 decoding) and local TTS.
+audio = ["sounddevice>=0.5", "av>=12", "soundfile>=0.12"]
+dev = ["pytest>=8.0", "ruff>=0.6", "av>=12"]
 
 [tool.setuptools.packages.find]
 include = ["asr*", "llm*", "pipeline*", "tts*", "agent*", "benchmarks*", "text*"]

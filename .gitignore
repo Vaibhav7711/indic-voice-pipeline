@@ -39,3 +39,4 @@ results/gpu_validation/*
 results/streaming_eval/**/*.wav
 results/streaming_eval/**/*.mp3
 results/llm_bakeoff/**/*.bin
+results/tts_bakeoff/**/*.wav

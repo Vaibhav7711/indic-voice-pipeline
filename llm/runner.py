@@ -27,6 +27,8 @@ class LLMMetrics:
     stopped_on_repetition: bool = False
     #: Set when a streaming consumer's should_stop() ended decoding (barge-in).
     stopped_by_caller: bool = False
+    static_cache: bool = False
+    compiled_decode: bool = False
 
     @property
     def mean_decode_ms(self) -> float:
@@ -43,6 +45,8 @@ class LLMMetrics:
             "peak_allocated_bytes": self.peak_allocated_bytes,
             "stopped_on_repetition": self.stopped_on_repetition,
             "stopped_by_caller": self.stopped_by_caller,
+            "static_cache": self.static_cache,
+            "compiled_decode": self.compiled_decode,
         }
 
 
@@ -101,10 +105,28 @@ class LLMRunner:
         *,
         repetition_penalty: float = 1.1,
         loop_guard_ngram: int = 4,
+        static_cache: bool = False,
+        compile_decode: bool = False,
+        max_cache_len: int = 2048,
     ):
         self.model = model
         self.tokenizer = tokenizer
         self.device = device
+        # Static KV cache: one pre-allocated buffer instead of a tensor that
+        # grows per token, addressed by cache_position. Same tokens as the
+        # dynamic path (a test asserts it). On its own it removes the per-step
+        # cat/realloc; with compile_decode the single-token forward is
+        # torch.compile'd in "reduce-overhead" mode, i.e. captured as a CUDA
+        # graph, which removes the Python and kernel-launch overhead that
+        # dominates small-batch decode on a T4. compile_decode requires
+        # static_cache (graphs need fixed shapes).
+        if compile_decode and not static_cache:
+            raise ValueError("compile_decode requires static_cache=True")
+        self.static_cache = static_cache
+        self.compile_decode = compile_decode
+        self.max_cache_len = max_cache_len
+        self._cache = None
+        self._compiled_step = None
         # Greedy decoding on a small model loops easily. The penalty (CTRL-style:
         # divide positive / multiply negative logits of already-seen tokens)
         # makes loops unlikely; the n-gram guard is the backstop that ends one
@@ -116,6 +138,39 @@ class LLMRunner:
 
         eos = tokenizer.eos_token_id
         self.eos_ids: set[int] = {eos} if isinstance(eos, int) else set(eos or [])
+
+    # -- static cache / compiled step ----------------------------------------
+
+    def _get_cache(self):
+        from transformers import StaticCache
+
+        if self._cache is None:
+            self._cache = StaticCache(config=self.model.config, max_cache_len=self.max_cache_len)
+        else:
+            # Buffers were allocated under inference_mode on first use; the
+            # in-place zeroing must run under it as well.
+            with torch.inference_mode():
+                self._cache.reset()
+        return self._cache
+
+    def _step_fn(self):
+        """Single-token forward with the static cache; compiled on demand."""
+        if self._compiled_step is not None:
+            return self._compiled_step
+
+        def step(input_ids, cache, cache_position):
+            return self.model(
+                input_ids=input_ids,
+                past_key_values=cache,
+                cache_position=cache_position,
+                use_cache=True,
+                return_dict=True,
+            ).logits
+
+        if self.compile_decode:
+            step = torch.compile(step, mode="reduce-overhead", fullgraph=True)
+        self._compiled_step = step
+        return step
 
     def _select(self, logits: torch.Tensor, seen: list[int]) -> torch.Tensor:
         """Greedy pick after repetition penalty. ``logits`` is (1, vocab)."""
@@ -153,20 +208,39 @@ class LLMRunner:
         input_ids = inputs["input_ids"]
         attention_mask = inputs["attention_mask"]
         metrics.prompt_tokens = input_ids.shape[1]
+        if self.static_cache and metrics.prompt_tokens + max_new_tokens > self.max_cache_len:
+            raise ValueError(
+                f"prompt ({metrics.prompt_tokens}) + max_new_tokens ({max_new_tokens}) exceeds "
+                f"max_cache_len={self.max_cache_len}"
+            )
 
         # Prefill.
+        cache = self._get_cache() if self.static_cache else None
+        position = metrics.prompt_tokens
         with _Timer(self.device) as timer, torch.inference_mode():
-            outputs = self.model(
-                input_ids=input_ids,
-                attention_mask=attention_mask,
-                use_cache=True,
-                return_dict=True,
-            )
+            if cache is not None:
+                outputs = self.model(
+                    input_ids=input_ids,
+                    past_key_values=cache,
+                    cache_position=torch.arange(position, device=self.device),
+                    use_cache=True,
+                    return_dict=True,
+                )
+            else:
+                outputs = self.model(
+                    input_ids=input_ids,
+                    attention_mask=attention_mask,
+                    use_cache=True,
+                    return_dict=True,
+                )
         metrics.prefill_ms = timer.ms
+        metrics.static_cache = cache is not None
+        metrics.compiled_decode = bool(self.compile_decode)
 
         seen = input_ids[0].tolist()
         next_token = self._select(outputs.logits[:, -1, :], seen)
         past_kv = outputs.past_key_values
+        step = self._step_fn() if cache is not None else None
         generated: list[int] = []
         n = self.loop_guard_ngram
 
@@ -189,23 +263,32 @@ class LLMRunner:
                     metrics.stopped_by_caller = True
                     break
 
-                attention_mask = torch.cat([
-                    attention_mask,
-                    torch.ones((1, 1), dtype=attention_mask.dtype, device=self.device),
-                ], dim=1)
-
-                with _Timer(self.device) as timer, torch.inference_mode():
-                    outputs = self.model(
-                        input_ids=next_token,
-                        attention_mask=attention_mask,
-                        past_key_values=past_kv,
-                        use_cache=True,
-                        return_dict=True,
-                    )
+                if cache is not None:
+                    with _Timer(self.device) as timer, torch.inference_mode():
+                        logits = step(
+                            next_token, cache,
+                            torch.tensor([position], device=self.device),
+                        )
+                    position += 1
+                    last_logits = logits[:, -1, :]
+                else:
+                    attention_mask = torch.cat([
+                        attention_mask,
+                        torch.ones((1, 1), dtype=attention_mask.dtype, device=self.device),
+                    ], dim=1)
+                    with _Timer(self.device) as timer, torch.inference_mode():
+                        outputs = self.model(
+                            input_ids=next_token,
+                            attention_mask=attention_mask,
+                            past_key_values=past_kv,
+                            use_cache=True,
+                            return_dict=True,
+                        )
+                    past_kv = outputs.past_key_values
+                    last_logits = outputs.logits[:, -1, :]
                 metrics.decode_ms.append(timer.ms)
 
-                next_token = self._select(outputs.logits[:, -1, :], seen)
-                past_kv = outputs.past_key_values
+                next_token = self._select(last_logits, seen)
         finally:
             metrics.generated_tokens = len(generated)
             metrics.total_ms = (perf_counter_ns() - total_start) / 1_000_000

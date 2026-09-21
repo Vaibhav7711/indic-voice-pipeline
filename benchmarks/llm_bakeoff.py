@@ -102,7 +102,7 @@ def summarize(rows: list[dict]) -> dict:
 
 
 def run_model(model_name: str, prompts: list[str], *, max_new_tokens: int,
-              dtype: str, language: str) -> tuple[list[dict], dict]:
+              dtype: str, language: str, compile_decode: bool = False) -> tuple[list[dict], dict]:
     import torch
 
     from llm import LLMRunner, build_chat_prompt, load_llm, system_prompt_for
@@ -112,7 +112,9 @@ def run_model(model_name: str, prompts: list[str], *, max_new_tokens: int,
     loaded = load_llm(model_name, dtype=None if dtype == "auto" else getattr(torch, dtype))
     dtype = str(loaded.dtype).replace("torch.", "")
     load_s = time.perf_counter() - t0
-    runner = LLMRunner(loaded.model, loaded.tokenizer, loaded.device)
+    runner = LLMRunner(loaded.model, loaded.tokenizer, loaded.device,
+                       static_cache=compile_decode, compile_decode=compile_decode,
+                       max_cache_len=1024)
     params = sum(p.numel() for p in loaded.model.parameters())
     torch.cuda.reset_peak_memory_stats(loaded.device)
 
@@ -160,7 +162,8 @@ def run_model(model_name: str, prompts: list[str], *, max_new_tokens: int,
                          "traceback": traceback.format_exc()})
 
     info = {
-        "model": model_name, "dtype": dtype, "params_millions": round(params / 1e6),
+        "model": model_name, "dtype": dtype, "compiled_decode": compile_decode,
+        "params_millions": round(params / 1e6),
         "load_seconds": round(load_s, 1),
         "peak_vram_gib": round(torch.cuda.max_memory_allocated(loaded.device) / 2**30, 2),
     }
@@ -178,6 +181,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--dtype", default="auto", choices=["auto", "bfloat16", "float16"],
                         help="auto: bf16 where native, else fp16 (T4 has no bf16)")
     parser.add_argument("--language", default="hi")
+    parser.add_argument("--compile", action="store_true",
+                        help="static KV cache + torch.compile(reduce-overhead) decode step")
     parser.add_argument("--out-dir", required=True)
     args = parser.parse_args(argv)
 
@@ -196,7 +201,8 @@ def main(argv: list[str] | None = None) -> int:
         slug = model_name.replace("/", "__")
         try:
             rows, info = run_model(model_name, prompts, max_new_tokens=args.max_new_tokens,
-                                   dtype=args.dtype, language=args.language)
+                                   dtype=args.dtype, language=args.language,
+                                   compile_decode=args.compile)
         except Exception as exc:  # noqa: BLE001 - one model failing must not end the run
             print(f"  FAILED to run: {type(exc).__name__}: {exc}")
             summary[model_name] = {"error": f"{type(exc).__name__}: {exc}"}
