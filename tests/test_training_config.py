@@ -54,3 +54,20 @@ def test_small_preset_is_the_superseded_run():
 def test_defaults_without_preset_are_the_dataclass_defaults():
     c = _config()
     assert c == lora.TrainingConfig()
+
+
+def test_hub_checkpoint_steps_only_counts_complete_checkpoints():
+    files = [
+        "checkpoint-200/adapter_model.safetensors", "checkpoint-200/trainer_state.json",
+        "checkpoint-400/adapter_model.safetensors",              # upload interrupted
+        "checkpoint-600/trainer_state.json", "checkpoint-600/optimizer.pt",
+        "best/adapter_model.safetensors", "train_config.json",
+    ]
+    assert lora.hub_checkpoint_steps(files) == [200, 600]
+    assert lora.hub_checkpoint_steps([]) == []
+
+
+def test_hub_flags_reach_the_config():
+    c = _config("--preset", "v2-turbo", "--hub-repo", "me/ckpts", "--hub-keep-checkpoints", "3")
+    assert c.hub_repo == "me/ckpts" and c.hub_keep_checkpoints == 3
+    assert _config("--preset", "v2-turbo").hub_repo is None

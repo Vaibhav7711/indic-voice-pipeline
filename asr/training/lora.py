@@ -19,11 +19,21 @@ Quick smoke run (small model, few samples)::
 
 IndicVoices (``ai4bharat/IndicVoices``) is gated: accept the terms on the Hub
 and ``huggingface-cli login`` before using ``--indicvoices-samples``.
+
+Checkpoints on the Hub (Kaggle, or any VM without persistent disk)::
+
+    python asr/training/lora.py --preset v2-turbo --output-dir /kaggle/working/v2 \
+        --hub-repo <user>/whisper-turbo-hindi-lora-ckpt
+
+Every checkpoint the Trainer saves is uploaded to that (private) repo and
+older ones pruned; on start, the newest checkpoint in the repo is downloaded
+and training resumes from it. ``best/`` and the run metrics go up at the end.
 """
 from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -68,6 +78,9 @@ class TrainingConfig:
     max_eval_samples: int | None = None
     resume_from_checkpoint: str | None = None
     seed: int = 42
+    #: Private Hub repo used as the checkpoint store (see module docstring).
+    hub_repo: str | None = None
+    hub_keep_checkpoints: int = 2
 
 
 PRESETS: dict[str, dict] = {
@@ -310,6 +323,92 @@ class DataCollator:
 # Train / evaluate
 # --------------------------------------------------------------------------
 
+# --------------------------------------------------------------------------
+# Hub checkpoint store
+# --------------------------------------------------------------------------
+
+_CKPT_RE = re.compile(r"^checkpoint-(\d+)/")
+
+
+def hub_checkpoint_steps(files: list[str]) -> list[int]:
+    """Steps of complete checkpoints among repo file paths (ascending).
+
+    A checkpoint counts only if its ``trainer_state.json`` is present — an
+    upload interrupted midway leaves weights without state, and resuming from
+    that would restart the schedule.
+    """
+    steps = set()
+    for path in files:
+        m = _CKPT_RE.match(path)
+        if m and path.endswith("/trainer_state.json"):
+            steps.add(int(m.group(1)))
+    return sorted(steps)
+
+
+def resume_from_hub(repo_id: str, output_dir: str) -> str | None:
+    """Download the newest complete checkpoint from ``repo_id``; return its path."""
+    from huggingface_hub import HfApi, snapshot_download
+
+    api = HfApi()
+    api.create_repo(repo_id, private=True, exist_ok=True)
+    steps = hub_checkpoint_steps(api.list_repo_files(repo_id))
+    if not steps:
+        return None
+    name = f"checkpoint-{steps[-1]}"
+    snapshot_download(repo_id, allow_patterns=[f"{name}/*"], local_dir=output_dir)
+    local = Path(output_dir) / name
+    if not (local / "trainer_state.json").is_file():
+        raise RuntimeError(f"downloaded {name} is incomplete")
+    print(f"resuming from Hub checkpoint {repo_id}/{name}")
+    return str(local)
+
+
+def make_hub_callback(repo_id: str, keep: int):
+    """TrainerCallback: upload each saved checkpoint, prune older ones."""
+    from huggingface_hub import HfApi
+    from transformers import TrainerCallback
+
+    api = HfApi()
+
+    class HubCheckpointCallback(TrainerCallback):
+        def on_save(self, args, state, control, **kwargs):
+            name = f"checkpoint-{state.global_step}"
+            folder = Path(args.output_dir) / name
+            if not folder.is_dir():
+                return
+            # trainer_state.json last, so a partial upload is never "complete".
+            files = sorted(folder.iterdir(), key=lambda p: p.name == "trainer_state.json")
+            for f in files:
+                api.upload_file(path_or_fileobj=str(f), path_in_repo=f"{name}/{f.name}",
+                                repo_id=repo_id, commit_message=f"{name}: {f.name}")
+            print(f"[hub] uploaded {name}")
+            steps = hub_checkpoint_steps(api.list_repo_files(repo_id))
+            protect = set(steps[-keep:])
+            best = getattr(state, "best_model_checkpoint", None)
+            if best:
+                m = re.search(r"checkpoint-(\d+)$", best)
+                if m:
+                    protect.add(int(m.group(1)))
+            for step in steps:
+                if step not in protect:
+                    api.delete_folder(f"checkpoint-{step}", repo_id=repo_id,
+                                      commit_message=f"prune checkpoint-{step}")
+                    print(f"[hub] pruned checkpoint-{step}")
+
+        def on_train_end(self, args, state, control, **kwargs):
+            out = Path(args.output_dir)
+            for name in ("best", "train_config.json", "train_metrics.json", "eval_metrics.json"):
+                p = out / name
+                if p.is_dir():
+                    api.upload_folder(folder_path=str(p), path_in_repo=name, repo_id=repo_id,
+                                      commit_message=f"final {name}")
+                elif p.is_file():
+                    api.upload_file(path_or_fileobj=str(p), path_in_repo=name, repo_id=repo_id,
+                                    commit_message=f"final {name}")
+
+    return HubCheckpointCallback()
+
+
 def write_train_config(config: TrainingConfig, sources: dict) -> None:
     import subprocess
 
@@ -384,8 +483,14 @@ def train(config: TrainingConfig):
         processing_class=processor.feature_extractor,
     )
 
+    resume = config.resume_from_checkpoint
+    if config.hub_repo:
+        trainer.add_callback(make_hub_callback(config.hub_repo, config.hub_keep_checkpoints))
+        if resume is None:
+            resume = resume_from_hub(config.hub_repo, config.output_dir)
+
     print("Starting training...")
-    result = trainer.train(resume_from_checkpoint=config.resume_from_checkpoint)
+    result = trainer.train(resume_from_checkpoint=resume)
 
     # Save the best adapter with the full processor so serving can load
     # tokenizer + feature extractor from the adapter directory alone.
@@ -402,6 +507,17 @@ def train(config: TrainingConfig):
         json.dump(eval_metrics, f, indent=2)
     print(f"Final validation WER: {eval_metrics.get('eval_wer', float('nan')):.2f}%")
     print(f"Saved to {best_dir}")
+    if config.hub_repo:
+        from huggingface_hub import HfApi
+
+        api = HfApi()
+        api.upload_folder(folder_path=str(best_dir), path_in_repo="best",
+                          repo_id=config.hub_repo, commit_message="final best adapter")
+        for name in ("train_config.json", "train_metrics.json", "eval_metrics.json"):
+            api.upload_file(path_or_fileobj=str(Path(config.output_dir) / name),
+                            path_in_repo=name, repo_id=config.hub_repo,
+                            commit_message=f"final {name}")
+        print(f"uploaded best/ and metrics to {config.hub_repo}")
     print("Final test numbers come from benchmarks.asr_eval, not from here.")
 
 
@@ -471,6 +587,9 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     p.add_argument("--max-train-samples", type=int, default=None)
     p.add_argument("--max-eval-samples", type=int, default=None)
     p.add_argument("--resume-from-checkpoint", default=None)
+    p.add_argument("--hub-repo", default=None,
+                   help="Private Hub repo as checkpoint store; resumes from its newest checkpoint")
+    p.add_argument("--hub-keep-checkpoints", type=int, default=None)
     p.add_argument("--seed", type=int, default=None)
     p.add_argument("--evaluate", action="store_true")
     p.add_argument("--checkpoint", default=None)
