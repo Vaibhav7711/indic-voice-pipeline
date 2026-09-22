@@ -159,6 +159,7 @@ scripts/
     streaming_gpu_smoke.py   Real Whisper behind StreamingSession, file replay
     voice_turn_gpu_smoke.py  One real ASR → LLM → TTS turn
     gpu_validation.py        All post-harness checks → results/gpu_validation/
+    bench_all.py             Every batch benchmark, unattended, one manifest
 
 results/
     eval/             Committed asr_eval runs backing docs/EXPERIMENTS.md

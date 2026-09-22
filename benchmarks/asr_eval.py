@@ -287,6 +287,15 @@ def score_predictions(
             "count": sum(1 for r in rows if r.get("hit_token_budget")),
             "ids": [r["id"] for r in rows if r.get("hit_token_budget")][:20],
         },
+        # What the decode guards did on this run. A no-speech suppression on a
+        # clip that *does* contain speech is a deletion of the whole
+        # utterance, so this count has to be read next to the WER.
+        "decode_guards_fired": {
+            "no_speech": sum(1 for r in rows if r.get("no_speech")),
+            "no_speech_ids": [r["id"] for r in rows if r.get("no_speech")][:20],
+            "repetition": sum(1 for r in rows if r.get("stopped_on_repetition")),
+            "repetition_ids": [r["id"] for r in rows if r.get("stopped_on_repetition")][:20],
+        },
         "examples": len(rows),
         "headline": {
             "wer_percent": primary_wer,
@@ -490,7 +499,16 @@ def command_run(args: argparse.Namespace) -> int:
         adapter_info = verify_adapter(adapter)
 
     loaded = load_whisper(args.model, adapter_path=adapter, dtype=dtype)
-    runner = ASRRunner(loaded.model, loaded.processor, loaded.device, loaded.dtype)
+    # Decode guards are part of the serving configuration, so they are set
+    # here and recorded in run_config.json: changing one and not recording it
+    # would make two runs incomparable without anyone noticing.
+    runner = ASRRunner(
+        loaded.model, loaded.processor, loaded.device, loaded.dtype,
+        no_speech_threshold=(None if args.no_speech_threshold < 0
+                             else args.no_speech_threshold),
+        loop_guard_ngram=args.loop_guard_ngram,
+        loop_guard_repeats=args.loop_guard_repeats,
+    )
 
     device_name = (
         torch.cuda.get_device_name(0) if torch.cuda.is_available() else "cpu"
@@ -540,6 +558,11 @@ def command_run(args: argparse.Namespace) -> int:
                 "audio_ref": example["audio_ref"],
                 "latency": latency,
                 "hit_token_budget": bool(result.metrics.hit_token_budget),
+                "no_speech": bool(result.metrics.no_speech),
+                "no_speech_prob": (None if result.metrics.no_speech_prob is None
+                                   else round(result.metrics.no_speech_prob, 4)),
+                "stopped_on_repetition": bool(result.metrics.stopped_on_repetition),
+                "compression_ratio": round(result.metrics.compression_ratio, 3),
             }
         )
         if position % 25 == 0 or position == len(examples):
@@ -554,6 +577,12 @@ def command_run(args: argparse.Namespace) -> int:
         "note": args.note,
         "language": args.language,
         "max_new_tokens": args.max_new_tokens,
+        "decode_guards": {
+            "no_speech_threshold": (None if args.no_speech_threshold < 0
+                                    else args.no_speech_threshold),
+            "loop_guard_ngram": args.loop_guard_ngram,
+            "loop_guard_repeats": args.loop_guard_repeats,
+        },
         "dtype": args.dtype,
         "warmup": args.warmup,
         "reporting_level": args.level,
@@ -599,6 +628,10 @@ def _print_report(metrics: dict) -> None:
     print(f"\n{'=' * 62}")
     print(f"Examples: {metrics['examples']}   level: {metrics['reporting_level']}")
     print(f"WER: {head['wer_percent']}%    CER: {head['cer_percent']}%")
+    guards = metrics.get("decode_guards_fired") or {}
+    if guards.get("no_speech") or guards.get("repetition"):
+        print(f"decode guards fired: no_speech on {guards.get('no_speech', 0)} clip(s), "
+              f"repetition on {guards.get('repetition', 0)}")
     cut = metrics.get("truncated_by_token_budget") or {}
     if cut.get("count"):
         print(f"!! {cut['count']} hypothesis/es were CUT OFF at the token budget "
@@ -720,6 +753,12 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--limit", type=int, default=None, help="None means full split")
     run.add_argument("--sample", default="random", choices=["random", "first"])
     run.add_argument("--seed", type=int, default=0)
+    run.add_argument("--no-speech-threshold", type=float, default=0.6,
+                     help="Skip decoding when P(<|nospeech|>) exceeds this; "
+                          "negative disables the check")
+    run.add_argument("--loop-guard-ngram", type=int, default=3,
+                     help="0 disables the repetition-loop guard")
+    run.add_argument("--loop-guard-repeats", type=int, default=4)
     run.add_argument("--max-new-tokens", type=int, default=None,
                      help="Default: the model's own limit (448 - prompt tokens). The old "
                           "225 truncates Hindi utterances longer than ~37 words.")
