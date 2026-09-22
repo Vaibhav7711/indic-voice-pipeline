@@ -368,11 +368,16 @@ in `train_config.json` under `runtime`, and prints a warning with the fix
 (`CUDA_VISIBLE_DEVICES=0`) when more than one GPU is visible. Recipe drift of
 this kind should not need arithmetic on `trainer_state.json` to notice.
 
-**v3 therefore repeats v2 with the preset's geometry restored** (single GPU,
-or `--grad-accum 2` on two) and the label-truncation fix, before any
-hyperparameter or data change is considered. Same base model, same data, same
-rank: if v2 was simply under-trained, that alone should close much of the
-1.8-point gap to the WER target.
+A v3 re-run with the preset's geometry restored (single GPU, plus the
+label-truncation fix) is the obvious next experiment and would likely close
+much of the 1.8-point gap, since v2 appears simply under-trained.
+
+**Decision (2026-09-22): not run. v2 is the final adapter for this project.**
+It is better than v1 on every quality and latency measure and is good enough
+for the agent; further ASR training is not where the remaining value is. The
+WER target of 22.0% is recorded as **missed**, not retroactively lowered, and
+the reason (half the optimizer steps) is documented above so the number is
+interpretable. Anyone resuming this work should start with that v3 re-run.
 
 ### Streaming evaluation (2026-09-21)
 

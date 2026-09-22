@@ -18,9 +18,9 @@ only as correctness references in tests, never in the execution path.
 
 Indian speech has specific challenges that off-the-shelf ASR doesn't handle
 well: Hindi-English code-switching, retroflex consonants (ट vs त), schwa
-deletion, and accented/noisy speech. This project fine-tunes Whisper-medium for
-Hindi (**40.4% → 25.8% WER** on FLEURS Hindi test, see below) and wires it into
-a full voice pipeline on a single T4 GPU.
+deletion, and accented/noisy speech. This project fine-tunes Whisper for Hindi
+(**40.4% → 23.8% WER** on FLEURS Hindi test, see below) and wires it into a
+full voice pipeline on a single T4 GPU.
 
 ## Run in Google Colab
 
@@ -351,18 +351,24 @@ All numbers below are from `benchmarks/asr_eval.py` on the same seeded random
 Tesla T4, fp16, LoRA merged, explicit `ASRRunner`). Evidence:
 `results/eval/medium-base-test-300-seed0/`, `results/eval/medium-lora-test-300-seed0/`.
 
-### ASR quality: Whisper-medium base vs Hindi LoRA v1
+### ASR quality on the same 300 clips
 
-| Metric | Base | LoRA v1 | Change |
-| --- | ---: | ---: | ---: |
-| WER (standard) | 40.43% | **25.82%** | −14.60 pp (−36.1% rel.) |
-| CER (standard) | 16.74% | **9.61%** | −7.13 pp |
-| WER (raw, no normalization) | 43.06% | 26.62% | |
-| WER (orthography-blind) | 39.09% | 24.26% | |
-| Truncation errors | 27 | 0 | |
-| Hallucination-run errors | 16 | 0 | |
+The shipped adapter is **v2**: `large-v3-turbo` + Hindi LoRA. v1
+(`whisper-medium`) is kept for comparison. Full history, including a
+token-budget bug that inflated earlier numbers, in `docs/EXPERIMENTS.md`.
 
-### ASR latency per utterance (mean over 300, LoRA v1)
+| Model | WER | CER | p50 latency | RTF |
+| --- | ---: | ---: | ---: | ---: |
+| whisper-medium base | 40.43% | 16.74% | 2461 ms | 0.230 |
+| medium + LoRA v1 | 25.82% | 9.61% | 2540 ms | 0.238 |
+| large-v3-turbo base | 30.40% | 11.55% | 1238 ms | 0.117 |
+| **turbo + LoRA v2 (shipped)** | **23.83%** | **8.43%** | **694 ms** | **0.066** |
+
+v2 is both better and 3.7× faster: `large-v3-turbo` keeps large-v3's encoder
+and distils the decoder to 4 layers, and ASR decode is the dominant term in
+the agent's response latency.
+
+### ASR latency per utterance (mean over 300, medium/LoRA v1)
 
 | Stage | Base | LoRA v1 |
 | --- | ---: | ---: |
