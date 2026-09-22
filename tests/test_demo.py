@@ -148,3 +148,16 @@ class TestFailureReachesTheBrowser:
                             lambda self: (_ for _ in ()).throw(RuntimeError("no CUDA")))
         session, text, status = agent.push_chunk((16000, np.zeros(160, np.float32)), None)
         assert session is None and text == "" and "model load failed" in status
+
+
+def test_launch_kwargs_disable_ssr_by_default():
+    """Gradio 5+ SSR starts a Node subprocess; where that is blocked the page
+    is unreachable even though Python is listening."""
+    from demo.app import launch_kwargs
+
+    kw = launch_kwargs()
+    assert kw["ssr_mode"] is False
+    assert kw["server_name"] == "0.0.0.0" and kw["server_port"] == 7860
+    assert launch_kwargs(share=True, server_port=7000)["share"] is True
+    assert launch_kwargs(server_port=7000)["server_port"] == 7000
+    assert launch_kwargs()["ssr_mode"] is False

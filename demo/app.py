@@ -279,6 +279,60 @@ class DemoAgent:
 # --------------------------------------------------------------------------
 
 
+def launch_kwargs(**overrides) -> dict:
+    """Launch settings that work in a sandboxed notebook.
+
+    ``ssr_mode=False`` is the important one: Gradio 5+ server-side rendering
+    starts a Node subprocess, and where that is blocked (hosted notebooks,
+    restricted containers) the page becomes unreachable even though the
+    Python server is listening. Everything else here is just explicit.
+    """
+    kwargs = {"ssr_mode": False, "server_name": "0.0.0.0", "server_port": 7860,
+              "share": False, "quiet": False}
+    kwargs.update(overrides)
+    return kwargs
+
+
+def diagnose(port: int = 7860, share: bool = True) -> dict:
+    """Launch, then report what is actually reachable. Returns the findings.
+
+    Prints the three routes in order of reliability so a dead URL can be
+    told apart from a dead app: the page fetched from inside the process,
+    the share tunnel, and (in Colab) the kernel proxy.
+    """
+    import urllib.request
+
+    ui = build_ui(DemoAgent())
+    _, local_url, share_url = ui.launch(**launch_kwargs(
+        server_port=port, share=share, prevent_thread_lock=True, quiet=True,
+    ))
+    findings = {"local_url": local_url, "share_url": share_url, "local_status": None,
+                "local_bytes": 0, "error": None}
+    try:
+        response = urllib.request.urlopen(local_url, timeout=10)
+        body = response.read(4000)
+        findings["local_status"] = response.status
+        findings["local_bytes"] = len(body)
+    except Exception as exc:  # noqa: BLE001
+        findings["error"] = f"{type(exc).__name__}: {exc}"
+
+    print(f"server listening: {findings['local_status'] == 200} "
+          f"({findings['local_status']}, {findings['local_bytes']} bytes)")
+    print(f"share tunnel: {share_url or 'UNAVAILABLE'}")
+    try:
+        from google.colab import output  # noqa: F401
+
+        print(f"colab: run  from google.colab import output; "
+              f"output.serve_kernel_port_as_iframe({port}, height=900)")
+    except ImportError:
+        print("colab: not running in Colab")
+    if findings["local_status"] != 200:
+        print("The app itself is not serving — this is not a URL problem. "
+              f"error: {findings['error']}")
+    findings["ui"] = ui
+    return findings
+
+
 def build_ui(agent: DemoAgent):
     import gradio as gr
 
@@ -353,10 +407,9 @@ def main(argv: list[str] | None = None) -> int:
         print(f"ready: {agent.status()}", flush=True)
 
     ui = build_ui(agent)
-    _, local_url, share_url = ui.launch(
-        share=args.share, server_name="0.0.0.0", server_port=args.port,
-        prevent_thread_lock=True, quiet=False,
-    )
+    _, local_url, share_url = ui.launch(**launch_kwargs(
+        share=args.share, server_port=args.port, prevent_thread_lock=True,
+    ))
     print(f"local:  {local_url}")
     if args.share:
         # launch() returns None for share_url when the tunnel binary could
