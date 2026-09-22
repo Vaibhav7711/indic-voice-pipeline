@@ -147,6 +147,7 @@ agent/
 
 demo/
     app.py            Gradio: Turn tab (measured latencies, memory) + Stream tab (live partials)
+    notebook.py       Same agent with no server: record/upload, play the reply inline
 
 scripts/
     setup.sh          Colab dependency installation
@@ -204,6 +205,23 @@ Hindi/English audio (16 kHz WAV)
 ```
 
 ## Interactive demo
+
+### In a notebook (no server, nothing to block)
+
+```python
+from demo.notebook import NotebookAgent, record
+agent = NotebookAgent(adapter="/content/v2-final/best", tts="mms").load()
+agent.turn(record(5))        # speak; transcript, answer, latencies, audio appear inline
+agent.turn(record(5))        # a follow-up: memory makes "और मुंबई का?" resolve
+agent.history(); agent.summary()
+```
+
+Recording uses the browser's own `MediaRecorder` through the kernel bridge
+and the reply plays as an `IPython.display.Audio` widget, so no port has to
+be reachable. This is the path to use on a hosted notebook where a Gradio
+tunnel or port proxy is blocked.
+
+### As a web app
 
 ```bash
 pip install -e ".[demo,audio]"
