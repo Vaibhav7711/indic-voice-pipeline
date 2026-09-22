@@ -9,6 +9,7 @@ Nothing here imports torch or contacts a network. Backends are injected through
 Protocols, so a full turn is unit-testable against fakes.
 """
 
+from agent.conversation import Conversation, Exchange
 from agent.playback import (
     AudioSink,
     BufferSink,
@@ -27,6 +28,8 @@ from agent.turn import (
 )
 
 __all__ = [
+    "Conversation",
+    "Exchange",
     "PlaybackSession", "PlaybackState", "PlaybackEvent", "PlaybackEventKind",
     "PlaybackResult", "AudioSink", "BufferSink",
     "VoiceTurn", "TurnState", "TurnMetrics", "TurnResult", "ResponseGenerator",

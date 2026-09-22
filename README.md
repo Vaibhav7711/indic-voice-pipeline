@@ -140,6 +140,7 @@ notebooks/
     gpu_validation_kaggle.ipynb  Stage 3-5 validation sweep on Kaggle GPU
 
 agent/
+    conversation.py   Dialogue history with a token budget; barge-in aware
     playback.py       Playback lifecycle and thread-safe barge-in
     turn.py           Turn orchestration: LLM stream → sentences → TTS → playback
     audio.py          Device sink (sounddevice) with incremental MP3 decoding

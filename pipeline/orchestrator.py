@@ -15,7 +15,7 @@ from asr.explicit.loader import LoadedWhisper
 from asr.explicit.runner import ASRMetrics, ASRRunner
 from asr.explicit.timing import peak_allocated, reset_peak
 from llm.loader import LoadedLLM
-from llm.prompting import build_chat_prompt, system_prompt_for
+from llm.prompting import build_chat_prompt, render_messages, system_prompt_for
 from llm.runner import LLMRunner
 from pipeline.memory import (
     MemoryStrategy,
@@ -80,11 +80,14 @@ class VoicePipeline:
         llm: LoadedLLM,
         *,
         system_prompt: str | None = None,
+        conversation=None,
     ):
         self.whisper = whisper
         self.llm = llm
         self.device = whisper.device
         self.custom_system_prompt = system_prompt
+        #: Optional agent.conversation.Conversation for multi-turn prompts.
+        self.conversation = conversation
 
         self.asr_runner = ASRRunner(
             whisper.model, whisper.processor, whisper.device, whisper.dtype,
@@ -99,6 +102,11 @@ class VoicePipeline:
 
     def _build_prompt(self, transcript: str, language: str | None) -> str:
         system = self.custom_system_prompt or system_prompt_for(language)
+        if self.conversation is not None:
+            if self.conversation.system is None:
+                self.conversation.system = system
+            return render_messages(self.llm.tokenizer,
+                                   self.conversation.messages(transcript))
         return build_chat_prompt(self.llm.tokenizer, system, transcript)
 
     def run(
@@ -171,6 +179,9 @@ class VoicePipeline:
 
         metrics.total_pipeline_ms = (perf_counter_ns() - pipe_start) / 1_000_000
         metrics.peak_allocated_bytes = peak_allocated(self.device)
+
+        if self.conversation is not None:
+            self.conversation.record(asr_result.text, llm_result.text)
 
         return PipelineResult(
             transcript=asr_result.text,

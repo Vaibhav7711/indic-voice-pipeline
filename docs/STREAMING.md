@@ -298,6 +298,31 @@ tests in `tests/test_agent.py` now pin the lazy behaviour.
 
 ---
 
+## 4b. Dialogue memory
+
+`agent/conversation.py` keeps the previous exchanges and puts them in the
+prompt, so "और मुंबई का?" after "दिल्ली का मौसम?" has a referent. Three
+decisions worth knowing:
+
+- **Budget.** History is trimmed oldest-first to `max_turns` (6) and a token
+  budget (800), measured with the model's own tokenizer when one is
+  available. A character estimate tuned for Latin text underestimates
+  Devanagari by several times — the same class of mistake as the 225-token
+  truncation bug — so the fallback estimator counts Devanagari separately.
+  The most recent exchange is never dropped.
+- **Barge-in honesty.** On an interruption the agent's later sentences were
+  never heard, so history records only the sentences synthesis actually
+  reached, with a `…` marker. Recording the full generated text would leave
+  the model believing the user knows something they do not, and the next
+  answer then refers back to it. In a text chat generated and delivered are
+  the same thing; in voice they are not.
+- **Nothing invented.** Failed or silent turns are not recorded at all,
+  rather than stored as an empty assistant reply.
+
+Prompts are rendered through the model's chat template
+(`llm.prompting.render_messages`), so history uses the model's own turn
+format instead of a hand-rolled transcript.
+
 ## 5. The four latencies
 
 Perceived responsiveness is one number — silence between the user finishing and

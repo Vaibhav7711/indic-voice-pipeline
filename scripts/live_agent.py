@@ -60,6 +60,9 @@ def main() -> int:
     parser.add_argument("--semantic-endpointing", action="store_true")
     parser.add_argument("--log", default="results/live/turns.jsonl")
     parser.add_argument("--max-turns", type=int, default=0, help="0 = until Ctrl-C")
+    parser.add_argument("--history-turns", type=int, default=6,
+                        help="Dialogue turns kept in the prompt; 0 disables memory")
+    parser.add_argument("--history-tokens", type=int, default=800)
     args = parser.parse_args()
 
     sd = None
@@ -67,7 +70,7 @@ def main() -> int:
         import sounddevice as sd
     import torch
 
-    from agent import VoiceTurn
+    from agent import Conversation, VoiceTurn
     from agent.audio import SoundDeviceSink
     from asr.explicit import ASRRunner, load_whisper
     from asr.streaming import StreamingConfig, StreamingSession, UpdateKind
@@ -110,7 +113,13 @@ def main() -> int:
         def sink_factory():
             return SoundDeviceSink(synth.format, device=args.output_device)
 
-    turn = VoiceTurn(llm_runner, synth, response_language="Hindi", sink_factory=sink_factory)
+    conversation = None
+    if args.history_turns > 0:
+        conversation = Conversation(max_turns=args.history_turns,
+                                    max_history_tokens=args.history_tokens,
+                                    tokenizer=llm.tokenizer)
+    turn = VoiceTurn(llm_runner, synth, response_language="Hindi",
+                     sink_factory=sink_factory, conversation=conversation)
 
     audio_q: queue.Queue = queue.Queue()
 
@@ -134,6 +143,10 @@ def main() -> int:
                 f.write(json.dumps(result.as_dict(), ensure_ascii=False) + "\n")
             m = result.metrics
             print(f"  ↳ [{result.state.value}] {result.response}")
+            if conversation is not None:
+                snap = conversation.snapshot()
+                print(f"    history: {snap['turns']} turn(s), {snap['history_tokens']} tokens"
+                      + (f", {snap['dropped']} dropped" if snap["dropped"] else ""))
             print(f"    response latency {m.response_latency_ms and round(m.response_latency_ms)} ms "
                   f"(asr {round(speech_end_to_final_ms)} | first token "
                   f"{m.final_transcript_to_first_llm_token_ms and round(m.final_transcript_to_first_llm_token_ms)} | "

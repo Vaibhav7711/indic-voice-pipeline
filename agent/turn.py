@@ -65,7 +65,7 @@ from time import perf_counter_ns
 from typing import Any, Protocol
 
 from agent.playback import AudioSink, BufferSink, PlaybackResult, PlaybackSession
-from llm.prompting import build_chat_prompt
+from llm.prompting import build_chat_prompt, render_messages
 from tts.streaming import SentenceBuffer, SpeechStream, iter_sentence
 
 __all__ = [
@@ -118,6 +118,8 @@ class TurnMetrics:
     barge_in: bool = False
     #: LLM decode was cut short by the barge-in (streaming backends only).
     llm_stopped_by_barge_in: bool = False
+    #: Whether this turn was added to the conversation history.
+    recorded_in_history: bool | None = None
     llm_generated_tokens: int | None = None
 
     @property
@@ -157,6 +159,7 @@ class TurnMetrics:
             "tts_sentence_level": self.tts_sentence_level,
             "barge_in": self.barge_in,
             "llm_stopped_by_barge_in": self.llm_stopped_by_barge_in,
+            "recorded_in_history": self.recorded_in_history,
             "llm_generated_tokens": self.llm_generated_tokens,
         }
 
@@ -202,6 +205,7 @@ class VoiceTurn:
         response_language: str = "hi",
         split_into_sentences: bool = True,
         llm_max_tokens: int = 128,
+        conversation=None,
         clock=None,
     ):
         self.generator = generator
@@ -211,6 +215,12 @@ class VoiceTurn:
         self.response_language = response_language
         self.split_into_sentences = split_into_sentences
         self.llm_max_tokens = llm_max_tokens
+        #: Optional :class:`agent.conversation.Conversation`. When present the
+        #: prompt carries the dialogue history and each completed turn is
+        #: recorded — with only the audio the user actually heard, so a
+        #: barge-in does not leave the model assuming an unheard sentence
+        #: was delivered.
+        self.conversation = conversation
         self._clock = clock or (lambda: perf_counter_ns() / 1_000_000)
 
         self.state = TurnState.IDLE
@@ -225,6 +235,10 @@ class VoiceTurn:
             "be spoken aloud."
         )
         tokenizer = getattr(self.generator, "tokenizer", None)
+        if self.conversation is not None:
+            if self.conversation.system is None:
+                self.conversation.system = system
+            return render_messages(tokenizer, self.conversation.messages(transcript))
         return build_chat_prompt(tokenizer, system, transcript)
 
     # -- barge-in ---------------------------------------------------------
@@ -397,10 +411,13 @@ class VoiceTurn:
         result.state = self.state
         metrics.total_turn_ms = self._clock() - turn_start
         result.metrics = metrics
+        if self.conversation is not None:
+            metrics.recorded_in_history = self.conversation.record_turn(result)
         return result
 
     def snapshot(self) -> dict:
         return {
             "state": self.state.value,
             "playback": self.playback.snapshot() if self.playback else None,
+            "conversation": self.conversation.snapshot() if self.conversation else None,
         }
