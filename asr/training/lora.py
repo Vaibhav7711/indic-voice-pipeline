@@ -436,7 +436,33 @@ def make_hub_callback(repo_id: str, keep: int):
     return HubCheckpointCallback()
 
 
-def write_train_config(config: TrainingConfig, sources: dict) -> None:
+def runtime_geometry(config: TrainingConfig, train_examples: int) -> dict:
+    """The batch geometry actually in force, not the one the preset asked for.
+
+    HF Trainer wraps the model in DataParallel when several GPUs are visible,
+    so ``per_device_train_batch_size`` is multiplied by the device count. On
+    Kaggle's "T4 x2" that silently doubled v2's effective batch to 16 and
+    halved its optimizer steps (1,335 instead of 2,668) at the same learning
+    rate — a different run from the preset, discovered only by arithmetic on
+    ``trainer_state.json``. Record it, and say so at startup.
+    """
+    devices = max(1, torch.cuda.device_count())
+    intended = config.batch_size * config.gradient_accumulation_steps
+    effective = intended * devices
+    steps_per_epoch = max(1, train_examples // effective)
+    return {
+        "visible_gpus": devices,
+        "per_device_batch_size": config.batch_size,
+        "gradient_accumulation_steps": config.gradient_accumulation_steps,
+        "intended_effective_batch": intended,
+        "effective_batch": effective,
+        "train_examples": train_examples,
+        "steps_per_epoch": steps_per_epoch,
+        "expected_total_steps": steps_per_epoch * config.epochs,
+    }
+
+
+def write_train_config(config: TrainingConfig, sources: dict, geometry: dict) -> None:
     import subprocess
 
     out = Path(config.output_dir)
@@ -445,8 +471,8 @@ def write_train_config(config: TrainingConfig, sources: dict) -> None:
         sha = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
     except Exception:  # noqa: BLE001
         sha = None
-    payload = {"config": asdict(config), "data": sources, "git_commit": sha,
-               "argv": sys.argv}
+    payload = {"config": asdict(config), "data": sources, "runtime": geometry,
+               "git_commit": sha, "argv": sys.argv}
     (out / "train_config.json").write_text(json.dumps(payload, indent=2) + "\n")
 
 
@@ -458,7 +484,23 @@ def train(config: TrainingConfig):
           + (f" + {config.indicvoices_samples} IndicVoices" if config.indicvoices_samples else ""))
     train_ds, eval_ds, sources = load_data(config)
     print(f"Train: {len(train_ds)}, Eval: {len(eval_ds)}  {sources}")
-    write_train_config(config, sources)
+    geometry = runtime_geometry(config, len(train_ds))
+    write_train_config(config, sources, geometry)
+    print(f"Batch geometry: {geometry['effective_batch']} effective "
+          f"({geometry['per_device_batch_size']} x {geometry['gradient_accumulation_steps']} accum "
+          f"x {geometry['visible_gpus']} gpu) -> {geometry['expected_total_steps']} steps")
+    if geometry["visible_gpus"] > 1:
+        print(
+            "!! WARNING: several GPUs are visible, so Trainer will use DataParallel and the\n"
+            f"!! effective batch is {geometry['effective_batch']}, not the preset's "
+            f"{geometry['intended_effective_batch']}. That halves the optimizer steps at the\n"
+            "!! same learning rate. To reproduce the preset, restart with\n"
+            "!!     CUDA_VISIBLE_DEVICES=0 python asr/training/lora.py ...\n"
+            "!! or divide --grad-accum by the GPU count. Continuing in 20 s."
+        )
+        import time
+
+        time.sleep(20)
 
     print("Loading model + applying LoRA...")
     model, processor = prepare_model(config)

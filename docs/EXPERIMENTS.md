@@ -346,13 +346,33 @@ WER target of 22.0% by 1.8 points, so it is *accepted but not final*:
 | `deletion_run` | ≤ 63 | 21 | pass |
 | Unrestricted language detection | `hi` | `hi` | pass |
 
-Open question before v3: `trainer_state.json` reports 1,335 steps for 3
-epochs at an effective batch of 8, which implies ~3,560 training examples —
-about half of FLEURS-hi train (~2,400) plus the 5,000 requested IndicVoices
-clips. The `max_audio_seconds=30` filter is the likely cause. Read
-`train_config.json`'s `data` block before choosing v3's data mix; if most
-IndicVoices clips are being dropped for length, segmenting them is worth
-more than any hyperparameter change.
+### v2 trained on half the optimizer steps v1 did
+
+Data was as intended: `train_config.json` reports 2,120 FLEURS-hi train +
+5,000 IndicVoices, 5 dropped by the 30-second filter, so 7,115 examples. At
+the preset's effective batch of 8 that is 2,668 steps for 3 epochs. The run
+did **1,335** — exactly half, because Kaggle's "T4 x2" makes two GPUs
+visible and HF Trainer wraps the model in DataParallel, multiplying
+`per_device_train_batch_size` by the device count: effective batch 16, not 8,
+at the same learning rate and warmup.
+
+So v2 is not v1's recipe on a new base model; it is that recipe with double
+the batch and half the steps. That is the most likely reason its LoRA gain
+over its base was 6.6 points where v1's was 14.6. Validation WER was still
+falling when the best checkpoint was taken (28.91 → 27.58 → 26.32 → 25.33 at
+steps 200/400/600/800), which is consistent with under-training rather than
+overfitting.
+
+`asr/training/lora.py` now computes the batch geometry at startup, records it
+in `train_config.json` under `runtime`, and prints a warning with the fix
+(`CUDA_VISIBLE_DEVICES=0`) when more than one GPU is visible. Recipe drift of
+this kind should not need arithmetic on `trainer_state.json` to notice.
+
+**v3 therefore repeats v2 with the preset's geometry restored** (single GPU,
+or `--grad-accum 2` on two) and the label-truncation fix, before any
+hyperparameter or data change is considered. Same base model, same data, same
+rank: if v2 was simply under-trained, that alone should close much of the
+1.8-point gap to the WER target.
 
 ### Streaming evaluation (2026-09-21)
 

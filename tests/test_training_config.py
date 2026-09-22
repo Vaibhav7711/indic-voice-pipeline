@@ -96,3 +96,19 @@ def test_ensure_hub_repo_uses_existing_and_explains_create_failure():
 
     with pytest.raises(SystemExit, match="huggingface.co/new"):
         lora.ensure_hub_repo(Api(exists=False), "me/ckpt")
+
+
+def test_runtime_geometry_exposes_the_batch_actually_in_force(monkeypatch):
+    import torch
+
+    cfg = _config("--preset", "v2-turbo")          # batch 2 x accum 4 = 8 intended
+    monkeypatch.setattr(torch.cuda, "device_count", lambda: 1)
+    one = lora.runtime_geometry(cfg, 7115)
+    assert one["effective_batch"] == 8 and one["expected_total_steps"] == 2667
+
+    # Kaggle "T4 x2": Trainer's DataParallel doubles the batch and halves the steps.
+    monkeypatch.setattr(torch.cuda, "device_count", lambda: 2)
+    two = lora.runtime_geometry(cfg, 7115)
+    assert two["effective_batch"] == 16
+    assert two["intended_effective_batch"] == 8
+    assert two["expected_total_steps"] == 1332          # what v2 actually ran (1335)
