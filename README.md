@@ -146,7 +146,7 @@ agent/
     audio.py          Device sink (sounddevice) with incremental MP3 decoding
 
 demo/
-    app.py            Gradio: record audio → transcript → answer → speech
+    app.py            Gradio: Turn tab (measured latencies, memory) + Stream tab (live partials)
 
 scripts/
     setup.sh          Colab dependency installation
@@ -202,6 +202,21 @@ Hindi/English audio (16 kHz WAV)
 │  Zero GPU cost                   │  voices, ~200-500 ms
 └──────────────────────────────────┘
 ```
+
+## Interactive demo
+
+```bash
+pip install -e ".[demo,audio]"
+WHISPER_ADAPTER_PATH=<v2 adapter dir or Hub id> TTS_BACKEND=mms python demo/app.py
+```
+
+Two tabs: **Turn** (record → transcript, answer, spoken reply, the measured
+latency breakdown and the dialogue history) and **Stream** (microphone chunks
+through the real `StreamingSession`, so partials appear while you talk and
+the endpointer decides when you stopped). Configuration is by environment
+variable — `WHISPER_MODEL`, `WHISPER_ADAPTER_PATH`, `LLM_MODEL`,
+`TTS_BACKEND` (`edge`/`mms`), `DEVICE` — so pointing it at a new adapter
+needs no code change.
 
 ## Quick demo
 
