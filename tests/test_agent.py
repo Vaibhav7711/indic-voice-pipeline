@@ -838,3 +838,55 @@ class TestLongSentenceSplitting:
         assert len(out) >= 2
         assert out[0] == "मुझे यह पसंद है"
         assert out[1].startswith("लेकिन"), "the connective opens the next unit"
+
+
+class TestTimeToFirstAudioDecomposes:
+    def test_generation_and_synthesis_sum_to_the_segment(self):
+        """'first token → audio out' must split into 'LLM still generating'
+        and 'synthesis', or the wrong stage gets blamed — as happened when a
+        4 s segment was attributed to TTS and was mostly generation."""
+        from agent import BufferSink, VoiceTurn
+
+        clock = {"now": 0.0}
+
+        def now():
+            return clock["now"]
+
+        class TickingLLM:
+            def stream(self, prompt, **kw):
+                clock["now"] += 50.0          # prefill
+                yield "पहला भाग "
+                clock["now"] += 400.0         # still generating, no terminator yet
+                yield "पूरा हुआ।"             # terminator → unit is speakable
+
+        class TickingTTS:
+            streaming = True
+
+            def stream(self, text):
+                clock["now"] += 120.0         # synthesis
+                yield b"\x01"
+
+        result = VoiceTurn(TickingLLM(), TickingTTS(), clock=now).run("x", sink=BufferSink())
+        m = result.metrics
+        assert m.first_token_to_first_unit_ms == 400.0
+        assert m.tts_synthesis_ms == 120.0
+        assert m.first_llm_token_to_playback_start_ms == 520.0
+        assert (m.first_token_to_first_unit_ms + m.tts_synthesis_ms
+                == m.first_llm_token_to_playback_start_ms)
+
+    def test_fields_are_none_when_nothing_was_synthesised(self):
+        from agent import BufferSink, VoiceTurn
+
+        class Silent:
+            def stream(self, prompt, **kw):
+                yield ""
+
+        class Tts:
+            streaming = True
+
+            def stream(self, text):
+                return iter(())
+
+        m = VoiceTurn(Silent(), Tts()).run("x", sink=BufferSink()).metrics
+        assert m.tts_synthesis_ms is None
+        assert m.first_llm_token_to_playback_start_ms is None

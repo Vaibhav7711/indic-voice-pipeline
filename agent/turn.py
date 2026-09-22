@@ -108,6 +108,11 @@ class TurnMetrics:
 
     llm_total_ms: float | None = None
     tts_first_chunk_ms: float | None = None
+    #: ``first_llm_token_to_playback_start_ms`` split in two: how long the
+    #: LLM kept generating before the first speakable unit existed, and how
+    #: long the synthesizer then took. These do sum to that segment.
+    first_token_to_first_unit_ms: float | None = None
+    tts_synthesis_ms: float | None = None
     playback_first_audio_ms: float | None = None
 
     # Provenance, so a reader can tell a measurement from an approximation.
@@ -152,6 +157,8 @@ class TurnMetrics:
             "total_turn_ms": ms(self.total_turn_ms),
             "llm_total_ms": ms(self.llm_total_ms),
             "tts_first_chunk_ms": ms(self.tts_first_chunk_ms),
+            "first_token_to_first_unit_ms": ms(self.first_token_to_first_unit_ms),
+            "tts_synthesis_ms": ms(self.tts_synthesis_ms),
             "playback_first_audio_ms": ms(self.playback_first_audio_ms),
             "llm_streaming": self.llm_streaming,
             "first_token_is_prefill_proxy": self.first_token_is_prefill_proxy,
@@ -371,6 +378,11 @@ class VoiceTurn:
             self.state = TurnState.SPEAKING
             index = synthesised["count"]
             synthesised["count"] += 1
+            # On the turn's own clock, so it is comparable with the first-token
+            # and first-audio marks. SpeechStream keeps its own perf_counter
+            # timeline for standalone use of iter_synthesis.
+            if marks.get("first_unit_at") is None:
+                marks["first_unit_at"] = self._clock()
             try:
                 for chunk in iter_sentence(
                     self.synthesizer, sentence, index, speech,
@@ -391,9 +403,15 @@ class VoiceTurn:
         metrics.playback_first_audio_ms = playback_result.first_audio_ms
 
         first_token_at = marks.get("first_token_at")
+        first_unit_at = marks.get("first_unit_at")
         if playback_result.first_audio_ms is not None and first_token_at is not None:
             first_audio_at = playback_start + playback_result.first_audio_ms
             metrics.first_llm_token_to_playback_start_ms = max(0.0, first_audio_at - first_token_at)
+            if first_unit_at is not None:
+                # The segment split in two, on one clock, so they sum: the LLM
+                # still generating until a unit was speakable, then synthesis.
+                metrics.first_token_to_first_unit_ms = max(0.0, first_unit_at - first_token_at)
+                metrics.tts_synthesis_ms = max(0.0, first_audio_at - first_unit_at)
         metrics.barge_in = playback_result.interrupted
 
         if "llm" in errors and not response_parts:

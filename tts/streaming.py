@@ -252,6 +252,11 @@ class SpeechStream:
 
     sentences: list[str] = field(default_factory=list)
     chunks: list[AudioChunk] = field(default_factory=list)
+    #: When the first unit was handed to the synthesizer, on the same clock
+    #: as ``first_chunk_ms``. The gap between them is synthesis time; the
+    #: time before it is the LLM still generating. Without this the two are
+    #: one opaque number and the wrong stage gets blamed.
+    first_unit_queued_ms: float | None = None
     first_chunk_ms: float | None = None
     total_ms: float = 0.0
     streaming: bool = False
@@ -261,11 +266,25 @@ class SpeechStream:
     def total_bytes(self) -> int:
         return sum(chunk.size for chunk in self.chunks)
 
+    @property
+    def synthesis_ms(self) -> float | None:
+        """First unit queued → first audio byte. The synthesizer's own cost."""
+        if self.first_chunk_ms is None or self.first_unit_queued_ms is None:
+            return None
+        return max(0.0, self.first_chunk_ms - self.first_unit_queued_ms)
+
     def as_dict(self) -> dict:
         return {
             "sentences": len(self.sentences),
             "chunks": len(self.chunks),
             "total_bytes": self.total_bytes,
+            "first_unit_queued_ms": (
+                None if self.first_unit_queued_ms is None
+                else round(self.first_unit_queued_ms, 3)
+            ),
+            "synthesis_ms": (
+                None if self.synthesis_ms is None else round(self.synthesis_ms, 3)
+            ),
             "first_chunk_ms": (
                 None if self.first_chunk_ms is None else round(self.first_chunk_ms, 3)
             ),
@@ -372,6 +391,8 @@ def iter_sentence(
     feeds sentences as the LLM produces them rather than from a finished
     response. Exceptions propagate; callers decide how to record them.
     """
+    if stream.first_unit_queued_ms is None:
+        stream.first_unit_queued_ms = (perf_counter_ns() - start_ns) / 1_000_000
     for data in synthesizer.stream(sentence):
         if should_stop is not None and should_stop():
             return

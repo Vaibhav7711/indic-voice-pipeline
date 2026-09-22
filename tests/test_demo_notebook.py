@@ -206,3 +206,36 @@ def test_stream_turn_decomposes_the_time_to_first_audio(tmp_path):
     assert answer["spoken_units"] >= 1
     assert answer["first_unit_chars"] > 0
     assert answer["tts_first_chunk_ms"] is not None
+
+
+class TestInputGain:
+    def test_quiet_take_is_lifted_to_the_target_peak(self):
+        from demo.notebook import TARGET_PEAK_DBFS, normalize_peak
+
+        quiet = (np.sin(np.arange(16_000) * 0.1) * (32767 * 10 ** (-24 / 20))).astype(np.int16)
+        scaled, gain_db = normalize_peak(quiet)
+        peak_dbfs = 20 * np.log10(np.abs(scaled).max() / 32767)
+        assert abs(peak_dbfs - TARGET_PEAK_DBFS) < 0.5
+        assert 19 < gain_db < 23
+
+    def test_already_loud_take_is_left_alone(self):
+        from demo.notebook import normalize_peak
+
+        loud = (np.sin(np.arange(1000) * 0.1) * (32767 * 10 ** (-3 / 20))).astype(np.int16)
+        scaled, gain_db = normalize_peak(loud)
+        assert gain_db == 0.0 and np.array_equal(scaled, loud)
+
+    def test_silence_is_not_amplified(self):
+        from demo.notebook import normalize_peak
+
+        scaled, gain_db = normalize_peak(np.zeros(1000, np.int16))
+        assert gain_db == 0.0 and not scaled.any()
+
+    def test_normalization_never_clips(self):
+        from demo.notebook import normalize_peak
+
+        for level_db in (-40, -24, -12, -6):
+            pcm = (np.sin(np.arange(4000) * 0.3) * (32767 * 10 ** (level_db / 20))).astype(np.int16)
+            scaled, _ = normalize_peak(pcm)
+            assert np.abs(scaled).max() <= 32767
+            assert np.abs(scaled).max() >= 32767 * 10 ** (-3.5 / 20)

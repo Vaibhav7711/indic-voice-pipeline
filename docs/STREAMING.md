@@ -295,6 +295,17 @@ Three things get called "streaming TTS" and only two are true here.
 Measure `first_chunk_ms` on your own network before quoting a number. A local
 TTS engine is the fix, not a wrapper.
 
+### Attribute before optimising
+
+`first_llm_token_to_playback_start_ms` contains two very different costs,
+and conflating them sends you to the wrong stage. A live turn showed 4062 ms
+there and the obvious reading was "TTS is slow"; the reply was one
+85-character sentence, so most of it was the LLM still generating with
+nothing speakable yet. It now splits into
+`first_token_to_first_unit_ms` + `tts_synthesis_ms`, measured on the turn's
+own clock so they sum exactly. On a 15-token reply the same machine showed
+synthesis at roughly 140 ms — the synthesizer was never the problem.
+
 ### One long sentence defeats sentence-level streaming
 
 `SentenceBuffer` also cuts at a **clause** boundary once a unit passes
@@ -377,7 +388,9 @@ which component to fix.
 | --- | --- | --- |
 | `speech_end_to_final_transcript_ms` | VAD endpoint → committed transcript | **`min_silence_ms`**, then ASR |
 | `final_transcript_to_first_llm_token_ms` | Prompt build + prefill | Prompt length |
-| `first_llm_token_to_playback_start_ms` | First token → first audio out | TTS round trip |
+| `first_llm_token_to_playback_start_ms` | First token → first audio out | Generating the first unit, then TTS |
+| `first_token_to_first_unit_ms` | First token → a unit is speakable | Reply length before the first boundary |
+| `tts_synthesis_ms` | That unit → first audio byte | The synthesizer (network, or local compute) |
 | `total_turn_ms` | End to end | — |
 
 **The first one includes the endpointer's own silence threshold.** That is dead

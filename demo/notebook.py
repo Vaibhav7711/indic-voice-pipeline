@@ -51,7 +51,31 @@ def pcm_to_wav_bytes(pcm: np.ndarray, sample_rate: int) -> bytes:
     return buffer.getvalue()
 
 
-def _webm_to_wav(data: bytes, out_path: str) -> str:
+#: Peak the recorder normalizes to. Laptop microphones through a browser
+#: often land near -24 dBFS, and Whisper transcribes such takes noticeably
+#: worse than the same words at a healthy level. -3 dBFS leaves headroom
+#: against clipping, which would be worse than quiet.
+TARGET_PEAK_DBFS = -3.0
+
+
+def normalize_peak(pcm: np.ndarray, target_dbfs: float = TARGET_PEAK_DBFS) -> tuple[np.ndarray, float]:
+    """Scale int16 PCM so its peak sits at ``target_dbfs``. Returns the gain.
+
+    Peak rather than RMS: it cannot clip, and it needs no assumption about
+    how much of the clip is speech. Digital silence is left alone.
+    """
+    peak = float(np.abs(pcm).max()) if pcm.size else 0.0
+    if peak <= 0:
+        return pcm, 0.0
+    target = 10 ** (target_dbfs / 20) * 32767.0
+    gain = target / peak
+    if 0.98 < gain < 1.02:
+        return pcm, 0.0
+    scaled = np.clip(pcm.astype(np.float32) * gain, -32768, 32767).astype(np.int16)
+    return scaled, 20 * float(np.log10(gain))
+
+
+def _webm_to_wav(data: bytes, out_path: str, *, normalize: bool = True) -> str:
     """Decode whatever the browser recorded into 16 kHz mono WAV."""
     import av
     import soundfile as sf
@@ -63,15 +87,25 @@ def _webm_to_wav(data: bytes, out_path: str) -> str:
             for resampled in resampler.resample(frame):
                 chunks.append(resampled.to_ndarray().reshape(-1))
     pcm = np.concatenate(chunks) if chunks else np.zeros(0, dtype=np.int16)
-    sf.write(out_path, pcm.astype(np.int16), 16_000)
+    pcm = pcm.astype(np.int16)
+    if normalize:
+        pcm, gain_db = normalize_peak(pcm)
+        if gain_db:
+            print(f"input gain {gain_db:+.1f} dB (peak normalized to "
+                  f"{TARGET_PEAK_DBFS:.0f} dBFS)")
+    sf.write(out_path, pcm, 16_000)
     return out_path
 
 
-def record(seconds: float = 5.0, out_path: str = "recording.wav") -> str:
+def record(seconds: float = 5.0, out_path: str = "recording.wav",
+           *, normalize: bool = True) -> str:
     """Record from the browser microphone in Colab; returns a WAV path.
 
     Uses the page's own ``MediaRecorder`` and passes the bytes back through
-    the kernel bridge, so nothing has to listen on a port.
+    the kernel bridge, so nothing has to listen on a port. The take is peak
+    normalized by default — browser microphone levels vary by more than
+    10 dB between takes and the quieter ones transcribe worse. This is
+    capture-stage conditioning and touches nothing in the evaluation path.
     """
     from google.colab import output
     from IPython.display import Javascript, display
@@ -99,7 +133,7 @@ def record(seconds: float = 5.0, out_path: str = "recording.wav") -> str:
     print(f"recording {seconds:.0f}s — speak now…")
     encoded = output.eval_js(f"recordBlob({int(seconds * 1000)})", timeout_sec=seconds + 30)
     print("recorded, decoding…")
-    return _webm_to_wav(base64.b64decode(encoded), out_path)
+    return _webm_to_wav(base64.b64decode(encoded), out_path, normalize=normalize)
 
 
 def upload() -> str:
@@ -359,6 +393,8 @@ class NotebookAgent:
                 # segment is one opaque number and the wrong stage gets blamed.
                 "llm_total_ms": result.metrics.llm_total_ms,
                 "tts_first_chunk_ms": result.metrics.tts_first_chunk_ms,
+                "first_token_to_first_unit_ms": result.metrics.first_token_to_first_unit_ms,
+                "tts_synthesis_ms": result.metrics.tts_synthesis_ms,
                 "llm_tokens": result.metrics.llm_generated_tokens,
                 "spoken_units": len(result.speech.sentences) if result.speech else 0,
                 "first_unit_chars": (len(result.speech.sentences[0])
@@ -420,10 +456,11 @@ class NotebookAgent:
                 f"| → final transcript | {ms(a['endpoint_to_final_ms'])} |",
                 f"| transcript → first LLM token | {ms(a['first_token_ms'])} |",
                 f"| first token → audio out | {ms(a['to_audio_ms'])} |",
-                f"| ⤷ LLM still generating ({a['llm_tokens']} tokens total) "
-                f"| {ms(a['llm_total_ms'])} |",
-                f"| ⤷ synthesis of the first unit ({a['first_unit_chars']} chars "
-                f"of {a['spoken_units']}) | {ms(a['tts_first_chunk_ms'])} |",
+                f"| ⤷ LLM generating until a unit was speakable "
+                f"({a['llm_tokens']} tokens in the reply) "
+                f"| {ms(a['first_token_to_first_unit_ms'])} |",
+                f"| ⤷ synthesis of that unit ({a['first_unit_chars']} chars, "
+                f"{a['spoken_units']} unit(s) total) | {ms(a['tts_synthesis_ms'])} |",
                 f"| **response latency** (as the user feels it) "
                 f"| **{ms(a['response_latency_ms'])}** |",
                 f"\n_utterance {a['utterance_seconds']}s, whole-utterance ASR "
