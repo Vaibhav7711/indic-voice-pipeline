@@ -288,6 +288,72 @@ GPU sweep; p50 ASR latency ≤ 1.35 s; `deletion_run` not above base turbo's 63.
 Rank (32) and data-mix (10k IndicVoices) ablations follow only after v2 is
 recorded against these.
 
+## v2: Whisper-large-v3-turbo Hindi LoRA (2026-09-22)
+
+`--preset v2-turbo`: v1's recipe with the base model swapped (decision and
+rationale above). Adapter: `/kaggle/working/v2-final/best`, checkpoints in a
+private Hub repo. Evidence:
+`results/eval/turbo-lora-v2-test-300-seed0-full/` (seed 0, 300 clips,
+`standard`, Tesla T4, fp16, commit `55f5c1e`).
+
+| Model | WER | CER | p50 | RTF |
+| --- | ---: | ---: | ---: | ---: |
+| medium base | 40.43% | 16.74% | 2461 ms | 0.230 |
+| medium + v1 | 25.82% | 9.61% | 2540 ms | 0.238 |
+| turbo base | 30.40% | 11.55% | 1238 ms | 0.117 |
+| **turbo + v2** | **23.83%** | **8.43%** | **694 ms** | **0.066** |
+
+Sensitivity: raw 24.83% / orthography-blind 22.54% (formatting 1.0 pt,
+orthography 1.29 pts — both back in line with v1 after fine-tuning, versus
+4.2 pts for base turbo). Categories: other 55.6%, rare_word 21.4%,
+function_word 10.7%, orthographic 5.3%, numeric 3.2%, truncation 1.6% (27),
+deletion_run 1.2% (21), code_switch 0.5%, hallucination 0.5%.
+
+### The 225-token bug, and why the first v2 number was wrong
+
+The first v2 evaluation reported 24.37% / 9.18% with 95 `deletion_run`
+errors. Those hypotheses all ended mid-word, mid-UTF-8 character: Devanagari
+costs ~6 BPE tokens per word, and `max_new_tokens=225` (hardcoded in the
+runner, the eval harness, the streaming config and the pipeline) cut every
+utterance over ~37 words. The affected references needed 263–399 tokens.
+`flags.truncated` did not catch it because that category requires the
+deletion run to reach the very last reference token, which a mangled final
+word prevents.
+
+Fixed in `55f5c1e`: the budget is derived from the model
+(`max_target_positions - prompt`, so 444), `metrics.hit_token_budget` and
+`metrics.json`'s `truncated_by_token_budget` make a cut hypothesis loud, and
+the harness prints a warning. **Any number produced before that commit on
+Hindi is an overstatement**; re-run rather than cite it.
+
+The same 225 was also truncating *training labels*, teaching the model to
+stop early on long utterances — the likely source of v2's remaining 27
+truncation and 21 deletion-run errors. Labels and `generation_max_length`
+now use 448, so v3 is the first run without it.
+
+### Decision
+
+**v2 replaces v1 as the served adapter.** Better on WER, CER and every
+latency measure (ASR decode 1712 ms → 380 ms in the pipeline waterfall), and
+it passes unrestricted language detection, which v1 cannot. It misses its
+WER target of 22.0% by 1.8 points, so it is *accepted but not final*:
+
+| Criterion | Target | v2 | |
+| --- | --- | --- | --- |
+| Test WER | ≤ 22.0% | 23.83% | miss |
+| Test CER | ≤ 8.5% | 8.43% | pass |
+| p50 ASR latency | ≤ 1.35 s | 694 ms | pass |
+| `deletion_run` | ≤ 63 | 21 | pass |
+| Unrestricted language detection | `hi` | `hi` | pass |
+
+Open question before v3: `trainer_state.json` reports 1,335 steps for 3
+epochs at an effective batch of 8, which implies ~3,560 training examples —
+about half of FLEURS-hi train (~2,400) plus the 5,000 requested IndicVoices
+clips. The `max_audio_seconds=30` filter is the likely cause. Read
+`train_config.json`'s `data` block before choosing v3's data mix; if most
+IndicVoices clips are being dropped for length, segmenting them is worth
+more than any hyperparameter change.
+
 ### Streaming evaluation (2026-09-21)
 
 `benchmarks/streaming_eval.py`, Hindi LoRA v1, 100 seeded FLEURS-hi test clips
