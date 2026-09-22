@@ -62,7 +62,9 @@ def main() -> int:
     parser.add_argument("--max-turns", type=int, default=0, help="0 = until Ctrl-C")
     args = parser.parse_args()
 
-    import sounddevice as sd
+    sd = None
+    if args.sink == "device" or not args.input_wav:
+        import sounddevice as sd
     import torch
 
     from agent import VoiceTurn
