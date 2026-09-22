@@ -354,6 +354,15 @@ class NotebookAgent:
                 "first_token_ms": result.metrics.final_transcript_to_first_llm_token_ms,
                 "to_audio_ms": result.metrics.first_llm_token_to_playback_start_ms,
                 "response_latency_ms": result.metrics.response_latency_ms,
+                # Decomposition of to_audio_ms: how much was the LLM still
+                # generating, and how much was synthesis. Without these the
+                # segment is one opaque number and the wrong stage gets blamed.
+                "llm_total_ms": result.metrics.llm_total_ms,
+                "tts_first_chunk_ms": result.metrics.tts_first_chunk_ms,
+                "llm_tokens": result.metrics.llm_generated_tokens,
+                "spoken_units": len(result.speech.sentences) if result.speech else 0,
+                "first_unit_chars": (len(result.speech.sentences[0])
+                                     if result.speech and result.speech.sentences else 0),
                 "sink": sink if speak else None,
             })
 
@@ -411,6 +420,10 @@ class NotebookAgent:
                 f"| → final transcript | {ms(a['endpoint_to_final_ms'])} |",
                 f"| transcript → first LLM token | {ms(a['first_token_ms'])} |",
                 f"| first token → audio out | {ms(a['to_audio_ms'])} |",
+                f"| ⤷ LLM still generating ({a['llm_tokens']} tokens total) "
+                f"| {ms(a['llm_total_ms'])} |",
+                f"| ⤷ synthesis of the first unit ({a['first_unit_chars']} chars "
+                f"of {a['spoken_units']}) | {ms(a['tts_first_chunk_ms'])} |",
                 f"| **response latency** (as the user feels it) "
                 f"| **{ms(a['response_latency_ms'])}** |",
                 f"\n_utterance {a['utterance_seconds']}s, whole-utterance ASR "

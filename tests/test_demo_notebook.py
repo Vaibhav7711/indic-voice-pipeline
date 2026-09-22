@@ -192,3 +192,17 @@ class TestStreamTurn:
         summary = agent.summary()
         assert summary["turns"] == 1
         assert summary["response_latency_ms_mean"] is not None
+
+
+def test_stream_turn_decomposes_the_time_to_first_audio(tmp_path):
+    """'first token → audio out' contains both the rest of generation and
+    synthesis; without the split the wrong stage gets blamed."""
+    agent, path = _wired_agent(tmp_path, seconds=2.0)
+    out = agent.stream_turn(path, quiet=True, speak=True)
+    answer = out["answers"][0]
+    for key in ("to_audio_ms", "llm_total_ms", "tts_first_chunk_ms",
+                "spoken_units", "first_unit_chars"):
+        assert key in answer, key
+    assert answer["spoken_units"] >= 1
+    assert answer["first_unit_chars"] > 0
+    assert answer["tts_first_chunk_ms"] is not None
