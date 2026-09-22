@@ -178,9 +178,124 @@ def test_runner_default_can_be_set_at_construction():
 
 
 def test_hitting_the_budget_is_recorded_not_silent():
+    # Loop guard off: the fake model emits one token forever, which the guard
+    # would (correctly) stop, and this test is about the budget.
     r = _budget_runner()
+    r.loop_guard_ngram = 0
     result = r.transcribe_array(np.zeros(16_000, dtype=np.float32), 16_000,
                                 language="hi", max_new_tokens=12)
     assert result.metrics.token_budget == 12
     assert result.metrics.decoder_steps == 12
     assert result.metrics.hit_token_budget is True, "a cut-off transcript must be flagged"
+
+
+# ---------------------------------------------------------------------------
+# Safeguards generate() has and a bare greedy loop does not
+# ---------------------------------------------------------------------------
+
+NO_SPEECH = 50363
+
+
+class _ScriptedModel(_BudgetModel):
+    """Emits a token script, and a settable P(<|nospeech|>) at prefill."""
+
+    def __init__(self, script, no_speech_logit=-20.0, positions=448):
+        super().__init__(positions)
+        self.script = list(script)
+        self.no_speech_logit = no_speech_logit
+        self.steps = 0
+
+    def __call__(self, *, encoder_outputs=None, decoder_input_ids=None, **kw):
+        prefill = decoder_input_ids.shape[1] > 1
+        logits = torch.full((1, decoder_input_ids.shape[1], VOCAB), -30.0)
+        token = self.script[min(self.steps, len(self.script) - 1)]
+        self.steps += 1
+        logits[0, -1, token] = 10.0
+        if prefill:
+            logits[0, -1, NO_SPEECH] = self.no_speech_logit
+        return SimpleNamespace(logits=logits, past_key_values=None)
+
+
+def _runner(model, **kw):
+    from asr.explicit.runner import ASRRunner
+
+    processor = SimpleNamespace(
+        feature_extractor=lambda *a, **k: SimpleNamespace(
+            input_features=torch.zeros(1, 80, 3000)),
+        tokenizer=SimpleNamespace(
+            decode=lambda ids, skip_special_tokens=True: " ".join("क" for _ in ids)),
+    )
+    return ASRRunner(model, processor, torch.device("cpu"), torch.float32, **kw)
+
+
+def _transcribe(runner):
+    return runner.transcribe_array(np.zeros(16_000, dtype=np.float32), 16_000, language="hi")
+
+
+def test_no_speech_window_is_not_transcribed():
+    """A high P(<|nospeech|>) must return empty, not a hallucinated phrase."""
+    model = _ScriptedModel([1234], no_speech_logit=20.0)     # dominates the softmax
+    result = _transcribe(_runner(model, no_speech_threshold=0.6))
+    assert result.text == "" and result.token_ids == []
+    assert result.metrics.no_speech is True
+    assert result.metrics.no_speech_prob > 0.6
+    assert result.metrics.decoder_steps == 0, "no decode loop should run"
+
+
+def test_no_speech_check_can_be_disabled():
+    model = _ScriptedModel([1234], no_speech_logit=20.0)
+    result = _transcribe(_runner(model, no_speech_threshold=None, loop_guard_ngram=0))
+    assert result.metrics.no_speech is False
+    assert result.metrics.decoder_steps > 0
+
+
+def test_speech_window_is_transcribed_and_probability_recorded():
+    model = _ScriptedModel([1234, 1235, 0], no_speech_logit=-20.0)
+    model.generation_config.eos_token_id = 0
+    result = _transcribe(_runner(model))
+    assert result.metrics.no_speech is False
+    assert result.metrics.no_speech_prob < 0.01
+    assert result.metrics.decoder_steps > 0
+
+
+def test_repetition_loop_stops_early_and_is_flagged():
+    """The live failure: one token repeated to the token budget, ~2 s of GPU
+    time for garbage that then goes to the LLM as a question."""
+    model = _ScriptedModel([7] * 200)
+    model.generation_config.eos_token_id = 0
+    guarded = _transcribe(_runner(model, loop_guard_ngram=1, loop_guard_repeats=4))
+    assert guarded.metrics.stopped_on_repetition is True
+    assert guarded.metrics.decoder_steps == 1, "keep one copy, drop the repeats"
+
+    loose = _transcribe(_runner(_ScriptedModel([7] * 500), loop_guard_ngram=0))
+    assert loose.metrics.stopped_on_repetition is False
+    assert loose.metrics.decoder_steps == loose.metrics.token_budget
+    assert guarded.metrics.decoder_steps < loose.metrics.decoder_steps / 10
+
+
+def test_loop_guard_detects_multi_token_cycles():
+    model = _ScriptedModel([11, 12, 13] * 50)
+    model.generation_config.eos_token_id = 0
+    result = _transcribe(_runner(model, loop_guard_ngram=3, loop_guard_repeats=3))
+    assert result.metrics.stopped_on_repetition is True
+    assert result.metrics.decoder_steps == 3
+
+
+def test_loop_guard_does_not_fire_on_ordinary_text():
+    script = list(range(100, 160)) + [0]
+    model = _ScriptedModel(script)
+    model.generation_config.eos_token_id = 0
+    result = _transcribe(_runner(model, loop_guard_ngram=3, loop_guard_repeats=4))
+    assert result.metrics.stopped_on_repetition is False
+    assert result.metrics.decoder_steps == len(script)
+
+
+def test_compression_ratio_separates_repetition_from_language():
+    from asr.explicit.runner import compression_ratio
+
+    repeated = "जी जैए " * 70
+    natural = ("इसे केमिकल का पीएच कहा जाता है आप लाल गोभी के जूस को "
+               "इस्तेमाल करके एक संकेतक बना सकते हैं")
+    assert compression_ratio(repeated) > 2.4
+    assert compression_ratio(natural) < 2.4
+    assert compression_ratio("") == 0.0

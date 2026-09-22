@@ -474,6 +474,7 @@ endpointer's `min_silence_ms` is added on top in a live session; see
 | Component | Required comparison |
 | --- | --- |
 | Explicit ASR decode | HF `model.generate()` greedy tokens (token-identical; verified on real Hindi audio) |
+| ASR loop guards | no-speech probability, n-gram repetition, compression ratio — the safeguards `generate()` applies, applied explicitly |
 | LLM decode | HF `model.generate()` greedy tokens |
 | LLM static-cache / compiled decode | Explicit eager decode, token-identical (`llm_compiled_matches_eager`) |
 | CTranslate2 engine | Explicit runner: token-identical at fp16/fp32, ≤ 5% WER apart at int8 (`ct2_matches_explicit`) |

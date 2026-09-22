@@ -166,6 +166,10 @@ class StreamingConfig:
     #: benchmark says the penalty is acceptable.
     incremental_finals: bool = False
     incremental_overlap_seconds: float = 2.0
+    #: Emit a final even when the transcriber flagged it as no-speech or a
+    #: repetition loop. Off: such text is not a question, and the agent
+    #: answering it is worse than the agent staying quiet.
+    keep_degenerate_finals: bool = False
     #: Let the candidate transcript lengthen the silence wait when the phrase
     #: is unfinished (see asr/streaming/policy.py). Off until measured.
     semantic_endpointing: bool = False
@@ -182,6 +186,7 @@ class StreamingConfig:
             "long_form_threshold_seconds": self.long_form_threshold_seconds,
             "language": self.language,
             "early_final_silence_ms": self.early_final_silence_ms,
+            "keep_degenerate_finals": self.keep_degenerate_finals,
             "incremental_finals": self.incremental_finals,
             "incremental_overlap_seconds": self.incremental_overlap_seconds,
             "semantic_endpointing": self.semantic_endpointing,
@@ -225,6 +230,13 @@ class StreamUpdate:
     decoded_seconds: float = 0.0
     #: Text was stitched onto an earlier partial (incremental decode).
     reused_partial: bool = False
+    #: Whisper judged the window to contain no speech.
+    no_speech: bool = False
+    #: The decode stopped on a repetition loop, or the text compresses like
+    #: one. Such a final is emitted with empty text unless
+    #: ``keep_degenerate_finals`` is set: a looped transcript is not a
+    #: question, and passing it to the LLM produces a confident non-answer.
+    degenerate: bool = False
 
     def as_dict(self) -> dict:
         return {
@@ -249,6 +261,8 @@ class StreamUpdate:
             "asr_ms_after_endpoint": round(self.asr_ms_after_endpoint, 3),
             "decoded_seconds": round(self.decoded_seconds, 3),
             "reused_partial": self.reused_partial,
+            "no_speech": self.no_speech,
+            "degenerate": self.degenerate,
         }
 
 
@@ -462,7 +476,8 @@ class StreamingSession:
         seconds = audio.size / rate
         long_form = seconds > self.config.long_form_threshold_seconds
         out = {"text": "", "asr_ms": 0.0, "long_form": long_form,
-               "seconds": seconds, "decoded_seconds": 0.0, "reused_partial": False}
+               "seconds": seconds, "decoded_seconds": 0.0, "reused_partial": False,
+               "no_speech": False, "degenerate": False}
         if not audio.size:
             return out
 
@@ -489,6 +504,13 @@ class StreamingSession:
             out["text"] = getattr(result, "text", "") or ""
             out["decoded_seconds"] = seconds
         out["asr_ms"] = self._asr_ms(result)
+        metrics = getattr(result, "metrics", None)
+        out["no_speech"] = bool(getattr(metrics, "no_speech", False))
+        threshold = getattr(self.transcriber, "compression_ratio_threshold", 2.4) or 2.4
+        out["degenerate"] = bool(
+            getattr(metrics, "stopped_on_repetition", False)
+            or (getattr(metrics, "compression_ratio", 0.0) or 0.0) > threshold
+        )
         if not long_form:
             self._partial_state = {"end": end_sample, "text": out["text"], "is_tail": False}
         return out
@@ -550,6 +572,9 @@ class StreamingSession:
             from_candidate, after = False, decoded["asr_ms"]
         text, asr_ms = decoded["text"], decoded["asr_ms"]
         seconds, long_form = decoded["seconds"], decoded["long_form"]
+        unusable = decoded.get("no_speech") or decoded.get("degenerate")
+        if unusable and not self.config.keep_degenerate_finals:
+            text = ""
 
         update = StreamUpdate(
             kind=UpdateKind.FINAL,
@@ -570,6 +595,8 @@ class StreamingSession:
             asr_ms_after_endpoint=after,
             decoded_seconds=decoded["decoded_seconds"],
             reused_partial=decoded["reused_partial"],
+            no_speech=bool(decoded.get("no_speech")),
+            degenerate=bool(decoded.get("degenerate")),
         )
 
         self.utterance_index += 1

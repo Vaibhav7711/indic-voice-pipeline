@@ -6,6 +6,7 @@ and pipeline("asr") are never called — correctness references only in tests.
 
 from __future__ import annotations
 
+import gzip
 from dataclasses import asdict, dataclass, field
 from time import perf_counter_ns
 
@@ -18,6 +19,15 @@ from asr.explicit.decoder import WhisperDecoder
 from asr.explicit.encoder import WhisperEncoder
 from asr.explicit.mel import extract_mel, load_audio, load_audio_from_array
 from asr.explicit.timing import peak_allocated, peak_reserved, reset_peak
+
+
+def compression_ratio(text: str) -> float:
+    """``len(text) / len(gzip(text))``. Whisper's own repetition detector:
+    natural language compresses ~1.5-2x, a repeated phrase far more."""
+    if not text:
+        return 0.0
+    raw = text.encode("utf-8")
+    return len(raw) / max(1, len(gzip.compress(raw)))
 
 
 @dataclass
@@ -36,6 +46,17 @@ class ASRMetrics:
     peak_reserved_bytes: int = 0
     encoder_hidden_size: int = 0
     encoder_seq_length: int = 0
+    #: Whisper's own P(<|nospeech|>) for this window, read where generate()
+    #: reads it. High values mean the audio has no speech in it.
+    no_speech_prob: float | None = None
+    #: gzip compression ratio of the transcript. Whisper's reference
+    #: implementation treats > 2.4 as a repetition loop; repeated text
+    #: compresses far better than language does.
+    compression_ratio: float = 0.0
+    #: The decode stopped because an n-gram repeated, not at EOS.
+    stopped_on_repetition: bool = False
+    #: The window was judged to contain no speech and was not transcribed.
+    no_speech: bool = False
     #: Tokens the decode loop was allowed to emit for this utterance.
     token_budget: int = 0
     #: True when decoding stopped because the budget ran out rather than at
@@ -119,6 +140,10 @@ class ASRRunner:
         *,
         language_candidates: list[str] | None = None,
         max_new_tokens: int | None = None,
+        no_speech_threshold: float | None = 0.6,
+        loop_guard_ngram: int = 3,
+        loop_guard_repeats: int = 4,
+        compression_ratio_threshold: float = 2.4,
     ):
         self.model = model
         self.processor = processor
@@ -134,6 +159,19 @@ class ASRRunner:
         # sentence needs ~300 tokens. Default to the model's real limit.
         self.max_target_positions = int(getattr(model.config, "max_target_positions", 448))
         self.default_max_new_tokens = max_new_tokens
+        # Safeguards `model.generate()` applies and a bare greedy loop does
+        # not. Without them, marginal audio (a cough, room noise, one
+        # syllable) is transcribed as a phrase and then repeated until the
+        # token budget runs out — ~2 s of GPU time for garbage, which then
+        # goes to the LLM as if it were a question.
+        #: Skip transcription when P(<|nospeech|>) exceeds this. None disables.
+        self.no_speech_threshold = no_speech_threshold
+        #: Stop when the last ``loop_guard_ngram`` tokens have repeated
+        #: ``loop_guard_repeats`` times in a row. 0 disables.
+        self.loop_guard_ngram = loop_guard_ngram
+        self.loop_guard_repeats = loop_guard_repeats
+        #: Flag (do not discard) transcripts that compress this well.
+        self.compression_ratio_threshold = compression_ratio_threshold
         self.encoder = WhisperEncoder(model, device)
         self.decoder = WhisperDecoder(model, device)
         self.eos_token_id = model.generation_config.eos_token_id
@@ -304,6 +342,22 @@ class ASRRunner:
             else set(self.eos_token_id or [])
         )
 
+        metrics.no_speech_prob = state.no_speech_prob
+        if (
+            self.no_speech_threshold is not None
+            and state.no_speech_prob is not None
+            and state.no_speech_prob >= self.no_speech_threshold
+        ):
+            # Whisper says there is nothing to transcribe. Returning empty is
+            # the honest answer; decoding anyway produces a hallucination.
+            metrics.no_speech = True
+            metrics.decoder_steps = 0
+            metrics.total_ms = (perf_counter_ns() - total_start) / 1_000_000
+            metrics.peak_allocated_bytes = peak_allocated(self.device)
+            metrics.peak_reserved_bytes = peak_reserved(self.device)
+            return ASRResult("", [], language, metrics)
+
+        n, repeats = self.loop_guard_ngram, self.loop_guard_repeats
         for step in range(max_new_tokens):
             token_id = int(state.next_token.item())
             if token_id in eos_ids:
@@ -311,6 +365,15 @@ class ASRRunner:
                 break
 
             state.decoded_tokens.append(token_id)
+            if n and repeats and len(state.decoded_tokens) >= n * repeats:
+                tail = state.decoded_tokens[-n * repeats:]
+                if all(tail[i * n:(i + 1) * n] == tail[:n] for i in range(1, repeats)):
+                    # A repetition loop: drop the repeats and stop. Keeping
+                    # one copy loses nothing real and saves the rest of the
+                    # token budget.
+                    del state.decoded_tokens[-n * (repeats - 1):]
+                    metrics.stopped_on_repetition = True
+                    break
             if step == max_new_tokens - 1:
                 break
 
@@ -330,6 +393,7 @@ class ASRRunner:
 
         text = self.processor.tokenizer.decode(
             state.decoded_tokens, skip_special_tokens=True,
-        )
+        ).strip()
+        metrics.compression_ratio = compression_ratio(text)
 
-        return ASRResult(text.strip(), state.decoded_tokens, language, metrics)
+        return ASRResult(text, state.decoded_tokens, language, metrics)

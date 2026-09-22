@@ -28,6 +28,8 @@ class DecoderState:
     encoder_outputs: BaseModelOutput
     next_token: torch.Tensor
     decoded_tokens: list[int]
+    #: P(<|nospeech|>) at the first decoding position; None if unavailable.
+    no_speech_prob: float | None = None
 
 
 class WhisperDecoder:
@@ -51,6 +53,21 @@ class WhisperDecoder:
         self._begin_suppress = self._ids_tensor(
             getattr(self.gen_config, "begin_suppress_tokens", None),
         )
+        # <|nospeech|>: Whisper's own estimate that the window contains no
+        # speech. Read at the first decoding position, exactly where
+        # generate() reads it. Without this the greedy loop transcribes
+        # silence or noise into a hallucinated phrase and then repeats it.
+        self.no_speech_token_id = self._resolve_no_speech_token()
+
+    def _resolve_no_speech_token(self) -> int | None:
+        for attr in ("no_speech_token_id", "no_speech_token"):
+            value = getattr(self.gen_config, attr, None)
+            if isinstance(value, int):
+                return value
+        # Not in the generation config on every checkpoint; the tokenizer
+        # knows it, but the decoder is not given one, so fall back to the
+        # id that has been stable across Whisper releases.
+        return 50363
 
     def _ids_tensor(self, ids) -> torch.Tensor | None:
         ids = [int(i) for i in (ids or [])]
@@ -210,12 +227,19 @@ class WhisperDecoder:
                 return_dict=True,
             )
 
-        next_token = self._pick(outputs.logits[:, -1, :], at_begin=True)
+        last_logits = outputs.logits[:, -1, :]
+        no_speech_prob = None
+        if self.no_speech_token_id is not None:
+            probs = torch.softmax(last_logits.float(), dim=-1)
+            no_speech_prob = float(probs[0, self.no_speech_token_id].item())
+
+        next_token = self._pick(last_logits, at_begin=True)
         state = DecoderState(
             past_key_values=outputs.past_key_values,
             encoder_outputs=encoder_outputs,
             next_token=next_token,
             decoded_tokens=[],
+            no_speech_prob=no_speech_prob,
         )
         return state, timer.ms
 
@@ -239,4 +263,5 @@ class WhisperDecoder:
             encoder_outputs=state.encoder_outputs,
             next_token=next_token,
             decoded_tokens=new_decoded,
+            no_speech_prob=state.no_speech_prob,
         ), timer.ms

@@ -771,3 +771,61 @@ class TestPhraseIsIncomplete:
         assert not phrase_is_incomplete("क्या आप आएंगे?")
         assert not phrase_is_incomplete("")
         assert not phrase_is_incomplete("और।")
+
+
+# ---------------------------------------------------------------------------
+# Degenerate finals: a looped transcript is not a question
+# ---------------------------------------------------------------------------
+
+
+class _DegenerateTranscriber(FakeTranscriber):
+    """Mimics the live failure: a repetition loop flagged by the runner."""
+
+    compression_ratio_threshold = 2.4
+
+    def __init__(self, *, no_speech=False, looped=False):
+        super().__init__()
+        self.no_speech = no_speech
+        self.looped = looped
+
+    def _result(self, seconds, tag):
+        text = "जी जैए " * 70 if self.looped else ("" if self.no_speech else "नमस्ते")
+        return types.SimpleNamespace(
+            text=text,
+            metrics=types.SimpleNamespace(
+                total_ms=self.asr_ms, no_speech=self.no_speech,
+                stopped_on_repetition=self.looped,
+                compression_ratio=8.0 if self.looped else 1.6,
+            ),
+        )
+
+
+class TestDegenerateFinals:
+    def _final(self, transcriber, **config):
+        session, _ = make_session(transcriber, early_final_silence_ms=0, **config)
+        updates = feed(session, audio((0.4, 0.0), (2.0, 0.3), (1.0, 0.0)))
+        return finals(updates)[0]
+
+    def test_repetition_loop_is_flagged_and_its_text_dropped(self):
+        final = self._final(_DegenerateTranscriber(looped=True))
+        assert final.degenerate is True
+        assert final.text == "", "a looped transcript must not reach the LLM"
+        assert final.is_final is True, "the utterance still ended; it just said nothing"
+
+    def test_no_speech_is_flagged(self):
+        final = self._final(_DegenerateTranscriber(no_speech=True))
+        assert final.no_speech is True and final.text == ""
+
+    def test_good_transcript_passes_through_unflagged(self):
+        final = self._final(_DegenerateTranscriber())
+        assert final.text == "नमस्ते"
+        assert final.degenerate is False and final.no_speech is False
+
+    def test_keeping_degenerate_finals_is_opt_in_for_debugging(self):
+        final = self._final(_DegenerateTranscriber(looped=True), keep_degenerate_finals=True)
+        assert final.degenerate is True
+        assert final.text.startswith("जी जैए")
+
+    def test_flags_are_serialized(self):
+        payload = self._final(_DegenerateTranscriber(looped=True)).as_dict()
+        assert payload["degenerate"] is True and payload["no_speech"] is False

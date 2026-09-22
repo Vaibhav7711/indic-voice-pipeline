@@ -136,6 +136,26 @@ serializes to JSONL for debugging:
 | `asr_ms_after_endpoint` | ASR time the user actually waited for |
 | `decoded_seconds`, `reused_partial` | How much audio went to the model; incremental stitch used |
 
+### Guarding the greedy loop
+
+`model.generate()` wraps Whisper in safeguards a bare greedy loop does not
+have, and on marginal audio their absence is not subtle. A live recording
+of one syllable plus room noise produced `जी जैए` repeated seventy times,
+2 s of GPU time, cut off mid-character at the token budget — and then went
+to the LLM as if it were a question. The explicit runner now applies three
+of them, all inspectable and all reported in `ASRMetrics`:
+
+| Guard | Rule | Field |
+| --- | --- | --- |
+| No speech | `P(<|nospeech|>)` read at the first decoding position, exactly where `generate()` reads it; above `no_speech_threshold` (0.6) the window returns empty instead of a hallucination | `no_speech`, `no_speech_prob` |
+| Loop guard | stop when the last `loop_guard_ngram` (3) tokens have repeated `loop_guard_repeats` (4) times, keeping one copy | `stopped_on_repetition` |
+| Compression ratio | `len(text) / len(gzip(text))`; Whisper's own detector, > 2.4 means repetition (language compresses ~1.5–2×) | `compression_ratio` |
+
+The streaming session then **drops the text of a final** flagged no-speech or
+degenerate: the utterance still ended, it just said nothing. An agent that
+stays quiet is better than one that answers a repetition loop confidently.
+`keep_degenerate_finals=True` keeps the text for debugging.
+
 ### Partials are approximate by construction
 
 A partial is decoded from incomplete audio, so the model lacks the right

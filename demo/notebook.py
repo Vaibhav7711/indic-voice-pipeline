@@ -322,8 +322,11 @@ class NotebookAgent:
 
         finals = [u for u in updates if u.kind == UpdateKind.FINAL and u.text.strip()]
         trace = [{"kind": u.kind.value, "at": round(u.stream_seconds, 2),
-                  "asr_ms": round(u.asr_ms, 1), "text": u.text}
-                 for u in updates if u.text.strip()]
+                  "asr_ms": round(u.asr_ms, 1), "text": u.text,
+                  "flags": ", ".join(f for f, on in
+                                     (("no_speech", u.no_speech), ("looped", u.degenerate))
+                                     if on)}
+                 for u in updates if u.text.strip() or u.no_speech or u.degenerate]
 
         answers = []
         for final in finals:
@@ -354,10 +357,13 @@ class NotebookAgent:
                 "sink": sink if speak else None,
             })
 
+        dropped = [u for u in updates
+                   if u.kind == UpdateKind.FINAL and (u.no_speech or u.degenerate)]
         record_ = {
             "audio": str(audio_path), "audio_seconds": round(seconds, 2),
             "vad": config.vad.as_dict(),
             "utterances": len(finals),
+            "dropped_finals": len(dropped),
             "partials": sum(1 for u in updates if u.kind == UpdateKind.PARTIAL),
             "candidates": sum(1 for u in updates if u.kind == UpdateKind.CANDIDATE),
             "trace": trace,
@@ -383,14 +389,18 @@ class NotebookAgent:
         lines = [
             f"**online endpointer** on {record_['audio_seconds']}s of audio: "
             f"{record_['utterances']} utterance(s), {record_['partials']} partial(s), "
-            f"{record_['candidates']} candidate(s)",
+            f"{record_['candidates']} candidate(s)"
+            + (f", {record_['dropped_finals']} dropped (no speech / repetition loop)"
+               if record_.get("dropped_finals") else ""),
             f"_min_silence {vad['min_silence_ms']} ms · padding {vad['padding_ms']} ms · "
             f"threshold {'adaptive' if vad['adaptive_threshold'] else vad['threshold_dbfs']}_",
             "",
         ]
         for event in record_["trace"]:
+            flags = f" **[{event['flags']}]**" if event.get("flags") else ""
+            text = event["text"][:120] + ("…" if len(event["text"]) > 120 else "")
             lines.append(f"- `{event['kind']:9s}` @{event['at']:5.1f}s "
-                         f"({event['asr_ms']:.0f} ms) {event['text']}")
+                         f"({event['asr_ms']:.0f} ms){flags} {text}")
         for a in answers:
             lines += [
                 "", f"**You:** {a['transcript']}", f"**Agent:** {a['response']}", "",
