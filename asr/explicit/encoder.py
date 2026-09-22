@@ -12,6 +12,8 @@ import torch
 from transformers import WhisperForConditionalGeneration
 from transformers.modeling_outputs import BaseModelOutput
 
+from asr.explicit.timing import Timer
+
 
 @dataclass
 class EncoderResult:
@@ -29,19 +31,13 @@ class WhisperEncoder:
     @torch.inference_mode()
     def forward(self, input_features: torch.Tensor) -> EncoderResult:
         """Run encoder on mel features (batch, 80, 3000) → hidden states."""
-        torch.cuda.synchronize(self.device)
-        start = torch.cuda.Event(enable_timing=True)
-        end = torch.cuda.Event(enable_timing=True)
-
-        start.record()
-        encoder_outputs = self.encoder(input_features, return_dict=True)
-        end.record()
-        end.synchronize()
+        with Timer(self.device) as timer:
+            encoder_outputs = self.encoder(input_features, return_dict=True)
 
         h = encoder_outputs.last_hidden_state
         return EncoderResult(
             encoder_outputs=encoder_outputs,
-            encoder_ms=start.elapsed_time(end),
+            encoder_ms=timer.ms,
             hidden_size=h.shape[-1],
             sequence_length=h.shape[1],
         )

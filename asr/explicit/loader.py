@@ -24,11 +24,19 @@ class LoadedWhisper:
     device: torch.device
 
 
+def pick_device(device: str | torch.device | None = None) -> torch.device:
+    """CUDA when available, else CPU. ``device`` overrides ("cpu", "cuda:1")."""
+    if device is not None:
+        return torch.device(device)
+    return torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+
 def load_whisper(
     model_name: str = "openai/whisper-small",
     *,
     adapter_path: str | Path | None = None,
-    dtype: torch.dtype = torch.float16,
+    dtype: torch.dtype | None = None,
+    device: str | torch.device | None = None,
 ) -> LoadedWhisper:
     """Load Whisper, optionally merging a PEFT LoRA adapter for inference.
 
@@ -39,8 +47,11 @@ def load_whisper(
     model, so its encoder/decoder and KV-cache path remain exactly the same as
     base-model inference.
     """
-    if not torch.cuda.is_available():
-        raise RuntimeError("CUDA required. Use a GPU Colab runtime.")
+    device = pick_device(device)
+    if dtype is None:
+        # fp16 on GPU (the reported configuration); fp32 on CPU, where fp16
+        # matmuls are unsupported or slow.
+        dtype = torch.float16 if device.type == "cuda" else torch.float32
 
     adapter = None
     if adapter_path:
@@ -55,7 +66,6 @@ def load_whisper(
                 "Invalid LoRA adapter directory; missing: " + ", ".join(missing),
             )
 
-    device = torch.device("cuda")
     # Trainer checkpoints contain the adapter and feature-extractor config but
     # not necessarily the tokenizer files. Final exported adapters do contain
     # them, so prefer those only when the complete processor is present.

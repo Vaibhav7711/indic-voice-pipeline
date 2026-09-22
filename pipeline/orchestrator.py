@@ -10,10 +10,10 @@ from dataclasses import dataclass, field
 from time import perf_counter_ns
 
 import numpy as np
-import torch
 
 from asr.explicit.loader import LoadedWhisper
 from asr.explicit.runner import ASRMetrics, ASRRunner
+from asr.explicit.timing import peak_allocated, reset_peak
 from llm.loader import LoadedLLM
 from llm.prompting import build_chat_prompt, system_prompt_for
 from llm.runner import LLMRunner
@@ -136,7 +136,7 @@ class VoicePipeline:
 
     def _run(self, transcribe, language: str | None, llm_max_tokens: int) -> PipelineResult:
         pipe_start = perf_counter_ns()
-        torch.cuda.reset_peak_memory_stats(self.device)
+        reset_peak(self.device)
         metrics = PipelineMetrics(memory_strategy=self.strategy.value)
         sequential = self.strategy == MemoryStrategy.SEQUENTIAL
 
@@ -170,7 +170,7 @@ class VoicePipeline:
             reload_to_gpu(self.whisper.model, self.device, self.whisper.dtype)
 
         metrics.total_pipeline_ms = (perf_counter_ns() - pipe_start) / 1_000_000
-        metrics.peak_allocated_bytes = torch.cuda.max_memory_allocated(self.device)
+        metrics.peak_allocated_bytes = peak_allocated(self.device)
 
         return PipelineResult(
             transcript=asr_result.text,

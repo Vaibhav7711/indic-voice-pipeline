@@ -34,6 +34,10 @@ class VRAMSnapshot:
 
 def snapshot_vram(device: torch.device | None = None) -> VRAMSnapshot:
     device = device or torch.device("cuda")
+    if device.type != "cuda":
+        # No allocator stats off-GPU; report "plenty" so the concurrent
+        # strategy is chosen and nothing is offloaded.
+        return VRAMSnapshot(0, 0, 1 << 40)
     return VRAMSnapshot(
         torch.cuda.memory_allocated(device),
         torch.cuda.memory_reserved(device),
@@ -54,7 +58,8 @@ def estimate_model_bytes(model: torch.nn.Module) -> int:
 
 def offload_to_cpu(model: torch.nn.Module) -> None:
     model.to("cpu")
-    torch.cuda.empty_cache()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
 
 
 def reload_to_gpu(model: torch.nn.Module, device: torch.device, dtype: torch.dtype) -> None:

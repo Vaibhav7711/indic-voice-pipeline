@@ -56,6 +56,7 @@ class MmsTtsSynthesizer:
         device: str | None = None,
         chunk_ms: int = 200,
         speaking_rate: float | None = None,
+        seed: int | None = None,
     ):
         if model_name is None:
             if language not in MMS_LANGUAGES:
@@ -67,6 +68,9 @@ class MmsTtsSynthesizer:
         self.device_name = device
         self.chunk_ms = chunk_ms
         self.speaking_rate = speaking_rate
+        #: VITS samples noise, so the same text gives different audio each
+        #: call. A seed makes synthesis repeatable (tests, benchmarks).
+        self.seed = seed
         self._model = None
         self._tokenizer = None
         self.format = AudioFormat("pcm_s16le", 16_000, 1)   # corrected on load
@@ -109,6 +113,8 @@ class MmsTtsSynthesizer:
 
         start = perf_counter_ns()
         inputs = self._tokenizer(text, return_tensors="pt").to(self._device)
+        if self.seed is not None:
+            torch.manual_seed(self.seed)
         with torch.inference_mode():
             waveform = self._model(**inputs).waveform[0]
         audio = waveform.float().cpu().numpy()

@@ -17,6 +17,7 @@ from asr.explicit.chunking import AudioChunk, chunk_audio, merge_overlapping_tra
 from asr.explicit.decoder import WhisperDecoder
 from asr.explicit.encoder import WhisperEncoder
 from asr.explicit.mel import extract_mel, load_audio, load_audio_from_array
+from asr.explicit.timing import peak_allocated, peak_reserved, reset_peak
 
 
 @dataclass
@@ -132,7 +133,7 @@ class ASRRunner:
     ) -> ASRResult:
         """Transcribe an audio file with full latency breakdown."""
         total_start = perf_counter_ns()
-        torch.cuda.reset_peak_memory_stats(self.device)
+        reset_peak(self.device)
 
         load_start = perf_counter_ns()
         waveform, duration = load_audio(path)
@@ -151,7 +152,7 @@ class ASRRunner:
     ) -> ASRResult:
         """Transcribe an in-memory waveform (for Gradio/pipeline use)."""
         total_start = perf_counter_ns()
-        torch.cuda.reset_peak_memory_stats(self.device)
+        reset_peak(self.device)
 
         load_start = perf_counter_ns()
         waveform, duration = load_audio_from_array(waveform, sample_rate)
@@ -295,8 +296,8 @@ class ASRRunner:
 
         metrics.decoder_steps = len(state.decoded_tokens)
         metrics.total_ms = (perf_counter_ns() - total_start) / 1_000_000
-        metrics.peak_allocated_bytes = torch.cuda.max_memory_allocated(self.device)
-        metrics.peak_reserved_bytes = torch.cuda.max_memory_reserved(self.device)
+        metrics.peak_allocated_bytes = peak_allocated(self.device)
+        metrics.peak_reserved_bytes = peak_reserved(self.device)
 
         text = self.processor.tokenizer.decode(
             state.decoded_tokens, skip_special_tokens=True,

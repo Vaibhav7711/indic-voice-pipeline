@@ -19,6 +19,8 @@ import torch
 from transformers import WhisperForConditionalGeneration
 from transformers.modeling_outputs import BaseModelOutput
 
+from asr.explicit.timing import Timer
+
 
 @dataclass
 class DecoderState:
@@ -199,20 +201,14 @@ class WhisperDecoder:
             [prompt_ids], dtype=torch.long, device=self.device,
         )
 
-        torch.cuda.synchronize(self.device)
-        start = torch.cuda.Event(enable_timing=True)
-        end = torch.cuda.Event(enable_timing=True)
-
-        start.record()
-        outputs = self.model(
-            encoder_outputs=encoder_outputs,
-            decoder_input_ids=decoder_input_ids,
-            past_key_values=None,
-            use_cache=True,
-            return_dict=True,
-        )
-        end.record()
-        end.synchronize()
+        with Timer(self.device) as timer:
+            outputs = self.model(
+                encoder_outputs=encoder_outputs,
+                decoder_input_ids=decoder_input_ids,
+                past_key_values=None,
+                use_cache=True,
+                return_dict=True,
+            )
 
         next_token = self._pick(outputs.logits[:, -1, :], at_begin=True)
         state = DecoderState(
@@ -221,24 +217,19 @@ class WhisperDecoder:
             next_token=next_token,
             decoded_tokens=[],
         )
-        return state, start.elapsed_time(end)
+        return state, timer.ms
 
     @torch.inference_mode()
     def decode_one(self, state: DecoderState) -> tuple[DecoderState, float]:
         """Decode one token. Self-attn cache grows; cross-attn cache reused."""
-        start = torch.cuda.Event(enable_timing=True)
-        end = torch.cuda.Event(enable_timing=True)
-
-        start.record()
-        outputs = self.model(
-            encoder_outputs=state.encoder_outputs,
-            decoder_input_ids=state.next_token,
-            past_key_values=state.past_key_values,
-            use_cache=True,
-            return_dict=True,
-        )
-        end.record()
-        end.synchronize()
+        with Timer(self.device) as timer:
+            outputs = self.model(
+                encoder_outputs=state.encoder_outputs,
+                decoder_input_ids=state.next_token,
+                past_key_values=state.past_key_values,
+                use_cache=True,
+                return_dict=True,
+            )
 
         next_token = self._pick(outputs.logits[:, -1, :], at_begin=False)
         new_decoded = list(state.decoded_tokens)
@@ -248,4 +239,4 @@ class WhisperDecoder:
             encoder_outputs=state.encoder_outputs,
             next_token=next_token,
             decoded_tokens=new_decoded,
-        ), start.elapsed_time(end)
+        ), timer.ms

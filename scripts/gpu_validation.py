@@ -484,6 +484,37 @@ def check_llm_compiled_matches_eager(pipe, transcript: str):
     return detail
 
 
+def check_ct2_matches_explicit(runner, clips, ct2_dir: str, compute_type: str):
+    """The engine tier must reproduce the explicit runner's tokens on the
+    same audio (fp16/fp32) or stay within a small WER of it (int8), and be
+    faster. Both are reported."""
+    from asr.engines.ct2 import CT2Transcriber
+    from asr.explicit.mel import load_audio
+
+    engine = CT2Transcriber(ct2_dir, device="cuda", compute_type=compute_type)
+    rows = []
+    for path, _ref, _sec in clips:
+        wav, _ = load_audio(str(path))
+        ex = runner.transcribe_array(wav, 16_000, language="hi")
+        ct = engine.transcribe_array(wav, 16_000, language="hi")
+        ex_tokens = runner.decoder.strip_generate_output(ex.token_ids)
+        rows.append({
+            "clip": path.name, "tokens_equal": ex_tokens == list(ct.token_ids),
+            "wer_ct2_vs_explicit": word_error_rate(ex.text, ct.text),
+            "explicit_ms": ex.metrics.total_ms, "ct2_ms": ct.metrics.total_ms,
+            "explicit_text": ex.text, "ct2_text": ct.text,
+        })
+    exact = sum(1 for r in rows if r["tokens_equal"])
+    mean_wer = float(np.mean([r["wer_ct2_vs_explicit"] for r in rows]))
+    speedup = float(np.mean([r["explicit_ms"] / r["ct2_ms"] for r in rows if r["ct2_ms"]]))
+    detail = {"clips": len(rows), "tokens_equal": exact, "mean_wer_vs_explicit": mean_wer,
+              "speedup": speedup, "compute_type": compute_type, "rows": rows}
+    quantized = compute_type.startswith("int8")
+    if (not quantized and exact != len(rows)) or (quantized and mean_wer > 5.0):
+        raise AssertionError(f"engine diverges from the explicit runner: {detail}")
+    return detail
+
+
 def check_pipeline_waterfall(pipe, clips):
     import torch
 
@@ -601,6 +632,9 @@ def main() -> int:
     parser.add_argument("--skip-unit-tests", action="store_true")
     parser.add_argument("--skip-network", action="store_true",
                         help="Skip edge-tts checks (voice turn, barge-in)")
+    parser.add_argument("--ct2-model", default=None,
+                        help="CTranslate2 model dir (scripts/convert_ct2.py) to validate against the runner")
+    parser.add_argument("--ct2-compute-type", default="int8_float16")
     args = parser.parse_args()
 
     out_dir = Path(args.out_dir)
@@ -650,6 +684,9 @@ def main() -> int:
                lambda: check_language_detection_adapter(runner, hi[:2] + en))
     report.run("long_form_chunking", lambda: check_long_form(runner, hi))
     report.run("streaming_session", lambda: check_streaming_session(runner, hi))
+    report.run("ct2_matches_explicit",
+               lambda: check_ct2_matches_explicit(runner, hi[:3], args.ct2_model, args.ct2_compute_type),
+               skip_if=None if args.ct2_model else "--ct2-model not given")
 
     def load_llm_and_pipe():
         from llm import load_llm

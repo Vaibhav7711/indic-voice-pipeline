@@ -33,7 +33,10 @@ import json
 import queue
 import sys
 import threading
+import time
 from pathlib import Path
+
+import numpy as np
 
 
 def main() -> int:
@@ -45,6 +48,11 @@ def main() -> int:
     parser.add_argument("--tts", default="edge", choices=["edge", "mms"])
     parser.add_argument("--language", default="hi")
     parser.add_argument("--input-device", default=None)
+    parser.add_argument("--input-wav", default=None,
+                        help="Replay this file as the microphone (real-time pacing), "
+                             "then trailing silence. Deterministic end-to-end check.")
+    parser.add_argument("--device", default=None, help="cuda / cpu (default: auto)")
+    parser.add_argument("--whisper-dtype", default=None, choices=[None, "float16", "float32"])
     parser.add_argument("--output-device", default=None)
     parser.add_argument("--incremental-finals", action="store_true")
     parser.add_argument("--semantic-endpointing", action="store_true")
@@ -53,6 +61,7 @@ def main() -> int:
     args = parser.parse_args()
 
     import sounddevice as sd
+    import torch
 
     from agent import VoiceTurn
     from agent.audio import SoundDeviceSink
@@ -61,9 +70,12 @@ def main() -> int:
     from llm import LLMRunner, load_llm
 
     print("loading models…", flush=True)
-    whisper = load_whisper(args.whisper_model, adapter_path=args.adapter)
+    dtype = getattr(torch, args.whisper_dtype) if args.whisper_dtype else None
+    whisper = load_whisper(args.whisper_model, adapter_path=args.adapter or None,
+                           device=args.device, dtype=dtype)
     asr = ASRRunner(whisper.model, whisper.processor, whisper.device, whisper.dtype)
-    llm = load_llm(args.llm_model)
+    llm = load_llm(args.llm_model, device=args.device)
+    print(f"whisper on {whisper.device} ({whisper.dtype}), llm on {llm.device} ({llm.dtype})")
     llm_runner = LLMRunner(llm.model, llm.tokenizer, llm.device,
                            static_cache=args.llm_compile, compile_decode=args.llm_compile,
                            max_cache_len=1024)
@@ -118,9 +130,28 @@ def main() -> int:
         finally:
             turn_state["speaking"] = False
 
+    import contextlib
+
+    if args.input_wav:
+        from asr.explicit.mel import load_audio
+
+        def replay():
+            wav, _ = load_audio(args.input_wav)
+            wav = np.concatenate([np.zeros(8_000, np.float32), wav, np.zeros(16_000 * 3, np.float32)])
+            for i in range(0, len(wav), 1600):
+                audio_q.put(wav[i:i + 1600])
+                time.sleep(0.1)                      # real-time pacing like a mic
+            while True:                              # keep "listening" in silence
+                audio_q.put(np.zeros(1600, np.float32))
+                time.sleep(0.1)
+
+        threading.Thread(target=replay, daemon=True).start()
+        stream = contextlib.nullcontext()
+        print(f"replaying {args.input_wav} as the microphone")
+    else:
+        stream = sd.InputStream(samplerate=16_000, channels=1, dtype="float32",
+                                blocksize=1600, device=args.input_device, callback=on_audio)
     print(f"listening ({args.language}); speak, pause, and the agent answers. Ctrl-C to stop.")
-    stream = sd.InputStream(samplerate=16_000, channels=1, dtype="float32",
-                            blocksize=1600, device=args.input_device, callback=on_audio)
     with stream:
         try:
             while True:
