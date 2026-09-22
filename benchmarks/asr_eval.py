@@ -279,6 +279,14 @@ def score_predictions(
 
     metrics = {
         "reporting_level": level.value,
+        # Hypotheses cut off because the decode ran out of tokens rather than
+        # reaching EOS. Any non-zero count makes WER an overstatement (the
+        # missing tail counts as deletions): re-run with a larger
+        # --max-new-tokens before reading the number.
+        "truncated_by_token_budget": {
+            "count": sum(1 for r in rows if r.get("hit_token_budget")),
+            "ids": [r["id"] for r in rows if r.get("hit_token_budget")][:20],
+        },
         "examples": len(rows),
         "headline": {
             "wer_percent": primary_wer,
@@ -531,6 +539,7 @@ def command_run(args: argparse.Namespace) -> int:
                 "categories": example["categories"],
                 "audio_ref": example["audio_ref"],
                 "latency": latency,
+                "hit_token_budget": bool(result.metrics.hit_token_budget),
             }
         )
         if position % 25 == 0 or position == len(examples):
@@ -590,6 +599,11 @@ def _print_report(metrics: dict) -> None:
     print(f"\n{'=' * 62}")
     print(f"Examples: {metrics['examples']}   level: {metrics['reporting_level']}")
     print(f"WER: {head['wer_percent']}%    CER: {head['cer_percent']}%")
+    cut = metrics.get("truncated_by_token_budget") or {}
+    if cut.get("count"):
+        print(f"!! {cut['count']} hypothesis/es were CUT OFF at the token budget "
+              f"(decode never reached EOS). WER is overstated; re-run with a larger "
+              f"--max-new-tokens. e.g. {', '.join(cut['ids'][:3])}")
     print(f"{'-' * 62}")
     print("Normalization sensitivity (WER %):")
     print(f"  raw (none)            {sens['raw_wer_percent']}")
@@ -706,7 +720,9 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--limit", type=int, default=None, help="None means full split")
     run.add_argument("--sample", default="random", choices=["random", "first"])
     run.add_argument("--seed", type=int, default=0)
-    run.add_argument("--max-new-tokens", type=int, default=225)
+    run.add_argument("--max-new-tokens", type=int, default=None,
+                     help="Default: the model's own limit (448 - prompt tokens). The old "
+                          "225 truncates Hindi utterances longer than ~37 words.")
     run.add_argument(
         "--dtype",
         default="float16",

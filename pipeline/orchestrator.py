@@ -106,7 +106,7 @@ class VoicePipeline:
         audio_path: str,
         *,
         language: str | None = None,
-        asr_max_tokens: int = 225,
+        asr_max_tokens: int | None = None,
         llm_max_tokens: int = 128,
     ) -> PipelineResult:
         """Run the pipeline on an audio file."""
@@ -123,7 +123,7 @@ class VoicePipeline:
         sample_rate: int,
         *,
         language: str | None = None,
-        asr_max_tokens: int = 225,
+        asr_max_tokens: int | None = None,
         llm_max_tokens: int = 128,
     ) -> PipelineResult:
         """Run pipeline on an in-memory waveform (Gradio/API)."""

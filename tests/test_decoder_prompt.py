@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+import numpy as np
 import pytest
 
 torch = pytest.importorskip("torch")
@@ -121,3 +122,65 @@ def test_pick_without_suppression_is_plain_argmax():
     logits = torch.zeros(1, VOCAB)
     logits[0, 5] = 1.0
     assert dec._pick(logits, at_begin=True).item() == 5
+
+
+# ---------------------------------------------------------------------------
+# Token budget: Devanagari needs far more tokens than the old 225 default
+# ---------------------------------------------------------------------------
+
+
+class _BudgetModel(_FakeModel):
+    """Never emits EOS, so the decode always runs to the budget."""
+
+    def __init__(self, positions=448):
+        super().__init__(favoured=HI)
+        self.generation_config.eos_token_id = 50257
+        self.config = SimpleNamespace(max_target_positions=positions)
+
+    def __call__(self, *, encoder_outputs=None, decoder_input_ids=None, **kw):
+        logits = torch.zeros(1, decoder_input_ids.shape[1], VOCAB)
+        logits[0, -1, 1234] = 10.0                 # a normal token, never EOS
+        return SimpleNamespace(logits=logits, past_key_values=None)
+
+    def get_encoder(self):
+        return lambda *a, **k: SimpleNamespace(last_hidden_state=torch.zeros(1, 1500, 1024))
+
+
+def _budget_runner(positions=448):
+    from asr.explicit.runner import ASRRunner
+
+    model = _BudgetModel(positions)
+    processor = SimpleNamespace(
+        feature_extractor=lambda *a, **k: SimpleNamespace(
+            input_features=torch.zeros(1, 80, 3000),
+        ),
+        tokenizer=SimpleNamespace(decode=lambda ids, skip_special_tokens=True: "x" * len(ids)),
+    )
+    return ASRRunner(model, processor, torch.device("cpu"), torch.float32)
+
+
+def test_budget_defaults_to_the_models_limit_minus_the_prompt():
+    r = _budget_runner()
+    # prompt is <|sot|><|hi|><|transcribe|><|notimestamps|> = 4 tokens
+    assert r.token_budget("hi", None) == 444
+    assert r.token_budget("hi", 100) == 100          # caller may ask for less
+    assert r.token_budget("hi", 10_000) == 444       # never more than the model
+    assert _budget_runner(positions=200).token_budget("hi", None) == 196
+
+
+def test_runner_default_can_be_set_at_construction():
+    from asr.explicit.runner import ASRRunner
+
+    r = _budget_runner()
+    r2 = ASRRunner(r.model, r.processor, torch.device("cpu"), torch.float32, max_new_tokens=64)
+    assert r2.token_budget("hi", None) == 64
+    assert r2.token_budget("hi", 32) == 32
+
+
+def test_hitting_the_budget_is_recorded_not_silent():
+    r = _budget_runner()
+    result = r.transcribe_array(np.zeros(16_000, dtype=np.float32), 16_000,
+                                language="hi", max_new_tokens=12)
+    assert result.metrics.token_budget == 12
+    assert result.metrics.decoder_steps == 12
+    assert result.metrics.hit_token_budget is True, "a cut-off transcript must be flagged"

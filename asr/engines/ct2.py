@@ -127,16 +127,16 @@ class CT2Transcriber:
     # -- StreamingTranscriber protocol ---------------------------------------
 
     def transcribe_array(self, waveform, sample_rate, *, language=None,
-                         max_new_tokens: int = 225, **kw) -> CT2Result:
+                         max_new_tokens: int | None = None, **kw) -> CT2Result:
         return self._run(waveform, sample_rate, language=language, max_new_tokens=max_new_tokens)
 
     def transcribe_long_array(self, waveform, sample_rate, *, language=None,
-                              max_new_tokens: int = 225, **kw) -> CT2Result:
+                              max_new_tokens: int | None = None, **kw) -> CT2Result:
         # faster-whisper windows long audio itself (30 s, with context
         # carried by the tokens of the previous window disabled above).
         return self._run(waveform, sample_rate, language=language, max_new_tokens=max_new_tokens)
 
-    def transcribe_file(self, path: str, *, language=None, max_new_tokens: int = 225) -> CT2Result:
+    def transcribe_file(self, path: str, *, language=None, max_new_tokens: int | None = None) -> CT2Result:
         from asr.explicit.mel import load_audio
 
         waveform, _ = load_audio(path)

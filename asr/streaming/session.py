@@ -149,7 +149,8 @@ class StreamingConfig:
     long_form_threshold_seconds: float = 25.0
 
     language: str | None = "hi"
-    max_new_tokens: int = 225
+    #: None = the model's own limit (see ASRRunner.token_budget).
+    max_new_tokens: int | None = None
     chunk_seconds: float = 25.0
     overlap_seconds: float = 5.0
 

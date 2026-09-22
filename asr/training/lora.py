@@ -292,9 +292,10 @@ def prepare_model(config: TrainingConfig):
 class DataCollator:
     """Audio + text -> input_features + labels."""
 
-    def __init__(self, processor, fp16: bool = True):
+    def __init__(self, processor, fp16: bool = True, max_label_length: int = 448):
         self.processor = processor
         self.fp16 = fp16
+        self.max_label_length = max_label_length
 
     def __call__(self, features):
         audio = [f["audio"]["array"] for f in features]
@@ -304,9 +305,12 @@ class DataCollator:
             audio, sampling_rate=16000, return_tensors="pt",
         )
 
+        # 448 is Whisper's decoder position count. The old 225 truncated the
+        # *labels* of long examples, which teaches the model to stop early —
+        # visible later as deletion runs at the end of long utterances.
         labels = self.processor.tokenizer(
             text, return_tensors="pt", padding=True,
-            truncation=True, max_length=225,
+            truncation=True, max_length=self.max_label_length,
         )
         label_ids = labels.input_ids.masked_fill(
             labels.attention_mask.ne(1), -100,
@@ -489,7 +493,7 @@ def train(config: TrainingConfig):
         metric_for_best_model="wer",
         greater_is_better=False,
         predict_with_generate=True,
-        generation_max_length=225,
+        generation_max_length=448,
         report_to="none",
         remove_unused_columns=False,
         dataloader_num_workers=2,
@@ -573,7 +577,7 @@ def evaluate_checkpoint(config: TrainingConfig, checkpoint: str):
             s["audio"]["array"], sampling_rate=16000, return_tensors="pt",
         ).input_features.to("cuda", dtype=torch.float16)
         with torch.inference_mode():
-            ids = model.generate(feat, max_new_tokens=225, language=config.language,
+            ids = model.generate(feat, max_new_tokens=444, language=config.language,
                                  task="transcribe")
         preds.append(processor.tokenizer.decode(ids[0], skip_special_tokens=True))
         refs.append(s["sentence"])

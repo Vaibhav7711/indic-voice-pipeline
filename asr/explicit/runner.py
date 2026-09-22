@@ -36,6 +36,12 @@ class ASRMetrics:
     peak_reserved_bytes: int = 0
     encoder_hidden_size: int = 0
     encoder_seq_length: int = 0
+    #: Tokens the decode loop was allowed to emit for this utterance.
+    token_budget: int = 0
+    #: True when decoding stopped because the budget ran out rather than at
+    #: EOS — the transcript is cut, usually mid-word. Never let this be
+    #: silent: a truncated hypothesis inflates WER as deletions.
+    hit_token_budget: bool = False
     #: Only set when ``language=None`` triggered detection.
     language_detection_ms: float | None = None
     language_probability: float | None = None
@@ -112,6 +118,7 @@ class ASRRunner:
         dtype: torch.dtype = torch.float16,
         *,
         language_candidates: list[str] | None = None,
+        max_new_tokens: int | None = None,
     ):
         self.model = model
         self.processor = processor
@@ -120,6 +127,13 @@ class ASRRunner:
         #: When ``language=None``, detection chooses among these codes only.
         #: None means every language Whisper knows.
         self.language_candidates = language_candidates
+        # Whisper's decoder has a fixed number of positions (448); minus the
+        # 3-4 prompt tokens that is the most it can emit. The old default of
+        # 225 was half of that and silently truncated long Devanagari
+        # utterances: Hindi costs ~6 BPE tokens per word, so a 50-word
+        # sentence needs ~300 tokens. Default to the model's real limit.
+        self.max_target_positions = int(getattr(model.config, "max_target_positions", 448))
+        self.default_max_new_tokens = max_new_tokens
         self.encoder = WhisperEncoder(model, device)
         self.decoder = WhisperDecoder(model, device)
         self.eos_token_id = model.generation_config.eos_token_id
@@ -129,7 +143,7 @@ class ASRRunner:
         path: str,
         *,
         language: str | None = None,
-        max_new_tokens: int = 225,
+        max_new_tokens: int | None = None,
     ) -> ASRResult:
         """Transcribe an audio file with full latency breakdown."""
         total_start = perf_counter_ns()
@@ -148,7 +162,7 @@ class ASRRunner:
         sample_rate: int,
         *,
         language: str | None = None,
-        max_new_tokens: int = 225,
+        max_new_tokens: int | None = None,
     ) -> ASRResult:
         """Transcribe an in-memory waveform (for Gradio/pipeline use)."""
         total_start = perf_counter_ns()
@@ -168,7 +182,7 @@ class ASRRunner:
         language: str | None = None,
         chunk_seconds: float = 25.0,
         overlap_seconds: float = 5.0,
-        max_new_tokens: int = 225,
+        max_new_tokens: int | None = None,
     ) -> LongFormASRResult:
         """Transcribe arbitrary-length file audio through bounded Whisper windows."""
         load_start = perf_counter_ns()
@@ -186,7 +200,7 @@ class ASRRunner:
         language: str | None = None,
         chunk_seconds: float = 25.0,
         overlap_seconds: float = 5.0,
-        max_new_tokens: int = 225,
+        max_new_tokens: int | None = None,
     ) -> LongFormASRResult:
         """Transcribe arbitrary-length in-memory audio with overlap-aware merging."""
         load_start = perf_counter_ns()
@@ -203,7 +217,7 @@ class ASRRunner:
         language: str | None,
         chunk_seconds: float,
         overlap_seconds: float,
-        max_new_tokens: int,
+        max_new_tokens: int | None,
     ) -> LongFormASRResult:
         total_start = perf_counter_ns()
         windows = chunk_audio(
@@ -236,13 +250,22 @@ class ASRRunner:
             ),
         )
 
+    def token_budget(self, language: str | None, requested: int | None) -> int:
+        """Tokens the decode loop may emit: the model's limit, or less if the
+        caller asked for less. Asking for more than the model supports would
+        run off the end of its position embeddings."""
+        prompt_len = len(self.decoder._build_prompt_ids(language or "en"))
+        limit = self.max_target_positions - prompt_len
+        wanted = requested if requested is not None else self.default_max_new_tokens
+        return limit if wanted is None else max(1, min(int(wanted), limit))
+
     def _transcribe(
         self,
         waveform: np.ndarray,
         duration: float,
         load_ms: float,
         language: str | None,
-        max_new_tokens: int,
+        max_new_tokens: int | None,
         total_start: int,
     ) -> ASRResult:
         metrics = ASRMetrics(audio_load_ms=load_ms, audio_duration_seconds=duration)
@@ -273,6 +296,8 @@ class ASRRunner:
         metrics.decoder_prefill_ms = prefill_ms
 
         # 5. Autoregressive decode loop.
+        max_new_tokens = self.token_budget(language, max_new_tokens)
+        metrics.token_budget = max_new_tokens
         eos_ids = (
             {self.eos_token_id}
             if isinstance(self.eos_token_id, int)
@@ -295,6 +320,10 @@ class ASRRunner:
             metrics.decode_ms.append(step_ms)
 
         metrics.decoder_steps = len(state.decoded_tokens)
+        metrics.hit_token_budget = (
+            len(state.decoded_tokens) >= max_new_tokens
+            and (not state.decoded_tokens or state.decoded_tokens[-1] not in eos_ids)
+        )
         metrics.total_ms = (perf_counter_ns() - total_start) / 1_000_000
         metrics.peak_allocated_bytes = peak_allocated(self.device)
         metrics.peak_reserved_bytes = peak_reserved(self.device)
