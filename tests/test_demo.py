@@ -129,3 +129,22 @@ class TestDemoAgentWithoutModels:
         c = Config()
         assert c.whisper_model == "openai/whisper-small"
         assert c.tts_backend == "mms" and c.adapter is None
+
+
+class TestFailureReachesTheBrowser:
+    def test_model_load_error_is_shown_not_swallowed(self, monkeypatch):
+        agent = DemoAgent()
+        monkeypatch.setattr(type(agent), "load",
+                            lambda self: (_ for _ in ()).throw(RuntimeError("no CUDA")))
+        transcript, answer, table, audio, _ = agent.run_turn(
+            (16000, np.zeros(1600, np.float32)), "hi", 96, False,
+        )
+        assert "model load failed" in table and "no CUDA" in table
+        assert (transcript, answer, audio) == ("", "", None)
+
+    def test_streaming_load_error_is_shown(self, monkeypatch):
+        agent = DemoAgent()
+        monkeypatch.setattr(type(agent), "new_session",
+                            lambda self: (_ for _ in ()).throw(RuntimeError("no CUDA")))
+        session, text, status = agent.push_chunk((16000, np.zeros(160, np.float32)), None)
+        assert session is None and text == "" and "model load failed" in status

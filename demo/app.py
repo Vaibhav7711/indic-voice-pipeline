@@ -22,7 +22,14 @@ adapter without editing code:
     TTS_BACKEND     edge (network, default) | mms (local)
     DEVICE          cuda | cpu (default: cuda when available)
 
-    python demo/app.py            # or: gradio demo/app.py
+    python demo/app.py --preload                 # load models before serving
+    python demo/app.py --no-share --port 7860    # local only
+
+``--preload`` matters on a fresh machine: the first turn otherwise spends a
+minute downloading Whisper, the LLM and the TTS voice with no feedback in
+the browser, which looks like a broken page. ``--share`` uses Gradio's
+tunnel, which some hosts block; the launcher reports whether the tunnel
+actually came up instead of printing a URL that may not resolve.
 """
 
 from __future__ import annotations
@@ -200,7 +207,11 @@ class DemoAgent:
         """Gradio handler: audio in → transcript, answer, table, audio, history."""
         if audio is None:
             return "", "", "_record something first_", None, history_markdown(self.conversation)
-        self.load()
+        try:
+            self.load()
+        except Exception as exc:  # noqa: BLE001 - must reach the browser
+            return ("", "", f"**model load failed**\n\n`{type(exc).__name__}: {exc}`",
+                    None, history_markdown(self.conversation))
         from agent.audio import DecodingBufferSink
         from agent.turn import VoiceTurn
 
@@ -246,7 +257,10 @@ class DemoAgent:
         if audio is None:
             return session, "", "waiting for audio"
         if session is None:
-            session = self.new_session()
+            try:
+                session = self.new_session()
+            except Exception as exc:  # noqa: BLE001 - must reach the browser
+                return None, "", f"**model load failed**: `{type(exc).__name__}: {exc}`"
         wave, sample_rate = to_float_mono(audio)
         if sample_rate != 16_000:
             from asr.explicit.mel import load_audio_from_array
@@ -319,9 +333,44 @@ def build_ui(agent: DemoAgent):
     return ui
 
 
-def main() -> int:
-    ui = build_ui(DemoAgent())
-    ui.launch(share=os.getenv("GRADIO_SHARE", "1") == "1")
+def main(argv: list[str] | None = None) -> int:
+    import argparse
+
+    parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+    parser.add_argument("--preload", action="store_true",
+                        help="Load the models now rather than on the first turn")
+    parser.add_argument("--port", type=int, default=int(os.getenv("GRADIO_PORT", "7860")))
+    share_default = os.getenv("GRADIO_SHARE", "1") == "1"
+    parser.add_argument("--share", dest="share", action="store_true", default=share_default)
+    parser.add_argument("--no-share", dest="share", action="store_false")
+    args = parser.parse_args(argv)
+
+    agent = DemoAgent()
+    print(f"config: {agent.config}")
+    if args.preload:
+        print("preloading models (first run downloads several GB)...", flush=True)
+        agent.load()
+        print(f"ready: {agent.status()}", flush=True)
+
+    ui = build_ui(agent)
+    _, local_url, share_url = ui.launch(
+        share=args.share, server_name="0.0.0.0", server_port=args.port,
+        prevent_thread_lock=True, quiet=False,
+    )
+    print(f"local:  {local_url}")
+    if args.share:
+        # launch() returns None for share_url when the tunnel binary could
+        # not be fetched or the host blocks it — say so, rather than leaving
+        # a printed URL that never resolves.
+        print(f"public: {share_url}" if share_url else
+              "public: UNAVAILABLE — the gradio.live tunnel did not come up "
+              "(blocked host or frpc download failed). Use the local URL, or on "
+              "Colab: from google.colab import output; "
+              f"output.serve_kernel_port_as_window({args.port})")
+    try:
+        ui.block_thread()
+    except KeyboardInterrupt:
+        print("stopping")
     return 0
 
 
