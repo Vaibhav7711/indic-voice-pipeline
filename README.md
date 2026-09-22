@@ -77,7 +77,9 @@ asr/
     endpointer.py     Online (frame-synchronous) speech endpointing
     session.py        Stateful streaming session with partial updates
   training/
-    lora.py           LoRA fine-tuning; --preset v1 is the shipped recipe
+    lora.py           LoRA fine-tuning; --preset v1 / v2-turbo; Hub checkpoint store
+  engines/
+    ct2.py            CTranslate2 / faster-whisper serving tier, validated against the runner
   vad.py              Offline energy VAD (the endpointer's reference)
 
 llm/
