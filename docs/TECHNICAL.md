@@ -444,6 +444,23 @@ templates.
 file-load step. Does not handle model swapping (assumes CONCURRENT for
 simplicity in the demo path).
 
+### `asr/engines/ct2.py` — the serving tier
+
+CTranslate2 (via faster-whisper) runs the same Whisper weights with fused
+kernels and int8/fp16 storage. `scripts/convert_ct2.py` merges the LoRA
+adapter first (so the adapter is baked in) and converts once; `CT2Transcriber`
+satisfies the streaming session's transcriber protocol, so it drops into
+`StreamingSession`, `benchmarks.streaming_eval` and `scripts/live_agent.py`
+unchanged. Decoding settings match the explicit runner: greedy, no
+temperature fallback, no VAD, no timestamps, no previous-text conditioning.
+
+What it costs you: per-token timings and the encoder/decoder split. What it
+has to prove: on the same audio it reproduces the explicit runner's tokens
+exactly at fp16/fp32, and stays within a few WER points at int8 (measured on
+CPU with whisper-small: fp32 identical on every clip; int8 flipped one
+low-confidence token on synthetic speech). The sweep's `ct2_matches_explicit`
+check enforces this on the GPU.
+
 ### `tts/synthesis.py`
 
 **Purpose**: Text-to-speech using edge-tts (Microsoft's free neural TTS API).

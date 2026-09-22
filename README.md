@@ -93,7 +93,8 @@ pipeline/
 
 tts/
     synthesis.py      Edge-TTS wrapper (Hindi/Telugu neural voices)
-    streaming.py      Sentence splitting and incremental synthesis
+    streaming.py      Sentence buffer and incremental synthesis
+    local.py          MMS-TTS local backend (no network on the critical path)
 
 benchmarks/
     asr_eval.py       Evaluation harness: WER/CER, error categories, latency
@@ -107,6 +108,7 @@ benchmarks/
     pipeline_e2e.py   Full waterfall benchmark
     streaming_eval.py Streaming session vs offline decode over a seeded subset; VAD grid
     llm_bakeoff.py    Candidate LLMs: Hindi quality proxies + time-to-first-sentence
+    tts_bakeoff.py    TTS backends: first-chunk latency, RTF, clips to listen to
 
 text/
     normalize.py      Hindi/Hinglish normalization ladder
@@ -139,7 +141,8 @@ notebooks/
 
 agent/
     playback.py       Playback lifecycle and thread-safe barge-in
-    turn.py           Turn orchestration with four-segment latency accounting
+    turn.py           Turn orchestration: LLM stream → sentences → TTS → playback
+    audio.py          Device sink (sounddevice) with incremental MP3 decoding
 
 demo/
     app.py            Gradio: record audio → transcript → answer → speech
@@ -148,6 +151,9 @@ scripts/
     setup.sh          Colab dependency installation
     preflight.py      GPU/import verification
     streaming_demo.py Simulated streaming turn (no GPU)
+    live_agent.py     Mic (or --input-wav) → streaming ASR → LLM → TTS → speakers, with barge-in
+    play_tts.py       Speak one sentence through the real audio path
+    convert_ct2.py    Merge a LoRA adapter and convert to CTranslate2
     streaming_gpu_smoke.py   Real Whisper behind StreamingSession, file replay
     voice_turn_gpu_smoke.py  One real ASR → LLM → TTS turn
     gpu_validation.py        All post-harness checks → results/gpu_validation/
@@ -416,9 +422,24 @@ endpointer's `min_silence_ms` is added on top in a live session; see
 
 | Component | Required comparison |
 | --- | --- |
-| Explicit ASR decode | HF `model.generate()` greedy tokens |
+| Explicit ASR decode | HF `model.generate()` greedy tokens (token-identical; verified on real Hindi audio) |
 | LLM decode | HF `model.generate()` greedy tokens |
+| LLM static-cache / compiled decode | Explicit eager decode, token-identical (`llm_compiled_matches_eager`) |
+| CTranslate2 engine | Explicit runner: token-identical at fp16/fp32, ≤ 5% WER apart at int8 (`ct2_matches_explicit`) |
 | Pipeline end-to-end | Standalone ASR + standalone LLM outputs |
+
+The explicit runners stay the reference implementation; an engine or a
+compiled path is a faster way to serve the same model and has to prove it
+against them on the same audio.
+
+### Runs on CPU too
+
+`load_whisper(device="cpu")` / `load_llm(device="cpu")` make the whole
+pipeline runnable on a laptop (fp32, wall-clock timings). It is slow —
+whisper-small decodes at RTF ≈ 1.6 on a MacBook — but it means the
+explicit-vs-`generate()` check, the CTranslate2 comparison and the live agent
+(`scripts/live_agent.py --input-wav question.wav`) all run without a GPU.
+GPU numbers are the ones reported; CPU runs are for correctness and demos.
 
 ## License
 
