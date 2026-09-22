@@ -54,6 +54,8 @@ def main() -> int:
     parser.add_argument("--device", default=None, help="cuda / cpu (default: auto)")
     parser.add_argument("--whisper-dtype", default=None, choices=[None, "float16", "float32"])
     parser.add_argument("--output-device", default=None)
+    parser.add_argument("--sink", default="device", choices=["device", "buffer"],
+                        help="buffer: capture audio in memory instead of a sound device (headless GPU boxes)")
     parser.add_argument("--incremental-finals", action="store_true")
     parser.add_argument("--semantic-endpointing", action="store_true")
     parser.add_argument("--log", default="results/live/turns.jsonl")
@@ -97,8 +99,16 @@ def main() -> int:
         semantic_endpointing=args.semantic_endpointing,
     )
     session = StreamingSession(asr, config)
-    turn = VoiceTurn(llm_runner, synth, response_language="Hindi",
-                     sink_factory=lambda: SoundDeviceSink(synth.format, device=args.output_device))
+    if args.sink == "buffer":
+        from agent.audio import DecodingBufferSink
+
+        def sink_factory():
+            return DecodingBufferSink(synth.format)
+    else:
+        def sink_factory():
+            return SoundDeviceSink(synth.format, device=args.output_device)
+
+    turn = VoiceTurn(llm_runner, synth, response_language="Hindi", sink_factory=sink_factory)
 
     audio_q: queue.Queue = queue.Queue()
 
