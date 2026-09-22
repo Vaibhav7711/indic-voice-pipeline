@@ -262,9 +262,11 @@ def prepare_model(config: TrainingConfig):
         config.model_name, torch_dtype=torch.float16 if config.fp16 else torch.float32,
     )
 
-    # Clear forced decoding so LoRA can learn freely.
-    model.config.forced_decoder_ids = None
-    model.config.suppress_tokens = []
+    # Clear forced decoding so LoRA can learn freely. This lives on
+    # generation_config: transformers >= 5 rejects generation settings placed
+    # on model.config. suppress_tokens is left as shipped so eval-time
+    # generate() applies the same suppression the explicit runner does.
+    model.generation_config.forced_decoder_ids = None
 
     # Gradient checkpointing saves memory; requires these two calls.
     model.config.use_cache = False
@@ -345,12 +347,33 @@ def hub_checkpoint_steps(files: list[str]) -> list[int]:
     return sorted(steps)
 
 
+def ensure_hub_repo(api, repo_id: str) -> None:
+    """Use ``repo_id`` if it exists; otherwise try to create it privately.
+
+    Creating a repo is a namespace-level right that many fine-grained tokens
+    lack even with full write scopes, so failure to create is reported with
+    the fix (make it on the website once) rather than as a bare 403.
+    """
+    from huggingface_hub.errors import HfHubHTTPError
+
+    if api.repo_exists(repo_id):
+        return
+    try:
+        api.create_repo(repo_id, private=True, exist_ok=True)
+    except HfHubHTTPError as exc:
+        raise SystemExit(
+            f"cannot create {repo_id!r} with this token ({exc.response.status_code if exc.response is not None else '?'}). "
+            f"Create it once at https://huggingface.co/new (private, model), or use a "
+            f"classic write token, then re-run with --hub-repo {repo_id}"
+        ) from exc
+
+
 def resume_from_hub(repo_id: str, output_dir: str) -> str | None:
     """Download the newest complete checkpoint from ``repo_id``; return its path."""
     from huggingface_hub import HfApi, snapshot_download
 
     api = HfApi()
-    api.create_repo(repo_id, private=True, exist_ok=True)
+    ensure_hub_repo(api, repo_id)
     steps = hub_checkpoint_steps(api.list_repo_files(repo_id))
     if not steps:
         return None

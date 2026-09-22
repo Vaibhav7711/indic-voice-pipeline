@@ -71,3 +71,28 @@ def test_hub_flags_reach_the_config():
     c = _config("--preset", "v2-turbo", "--hub-repo", "me/ckpts", "--hub-keep-checkpoints", "3")
     assert c.hub_repo == "me/ckpts" and c.hub_keep_checkpoints == 3
     assert _config("--preset", "v2-turbo").hub_repo is None
+
+
+def test_ensure_hub_repo_uses_existing_and_explains_create_failure():
+    from types import SimpleNamespace
+
+    from huggingface_hub.errors import HfHubHTTPError
+
+    class Api:
+        def __init__(self, exists):
+            self.exists, self.created = exists, False
+
+        def repo_exists(self, repo_id):
+            return self.exists
+
+        def create_repo(self, repo_id, private=True, exist_ok=True):
+            self.created = True
+            resp = SimpleNamespace(status_code=403, headers={}, text="", url="", request=None)
+            raise HfHubHTTPError("403 Forbidden", response=resp)
+
+    ok = Api(exists=True)
+    lora.ensure_hub_repo(ok, "me/ckpt")
+    assert ok.created is False
+
+    with pytest.raises(SystemExit, match="huggingface.co/new"):
+        lora.ensure_hub_repo(Api(exists=False), "me/ckpt")
