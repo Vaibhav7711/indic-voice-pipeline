@@ -17,6 +17,15 @@ the browser's own recorder, and the answer is played with
 ``turn`` prints the transcript, the answer, the measured latencies, and
 displays the spoken reply as a playable widget. It returns the numbers too,
 so a session can be logged rather than just watched.
+
+**Which VAD is in play.** ``turn`` hands the whole recording to Whisper: a
+fixed-length clip is already bounded, so nothing has to decide where speech
+ends, and its ``response_latency_ms`` carries no endpoint term.
+``stream_turn`` pushes the same clip through ``StreamingSession`` in
+microphone-sized blocks, so the *online* endpointer decides where the
+utterance ends and the number includes the silence wait the user really
+sits through. Use ``turn`` to measure the model, ``stream_turn`` to measure
+the agent.
 """
 
 from __future__ import annotations
@@ -28,7 +37,7 @@ from pathlib import Path
 
 import numpy as np
 
-__all__ = ["NotebookAgent", "record", "upload", "pcm_to_wav_bytes"]
+__all__ = ["NotebookAgent", "record", "upload", "pcm_to_wav_bytes", "audio_report"]
 
 
 def pcm_to_wav_bytes(pcm: np.ndarray, sample_rate: int) -> bytes:
@@ -103,6 +112,39 @@ def upload() -> str:
         return _webm_to_wav(uploaded[name], "uploaded.wav")
     Path(name).write_bytes(uploaded[name])
     return name
+
+
+def audio_report(path: str, show: bool = True) -> dict:
+    """Duration, level and where the offline VAD finds speech.
+
+    Worth running before reading a surprising transcript: it separates "the
+    model misheard" from "there was nothing there to hear".
+    """
+    from asr.explicit.mel import load_audio
+    from asr.vad import VADConfig, detect_speech, frame_dbfs
+
+    wave_, seconds = load_audio(str(path))
+    levels = [frame_dbfs(wave_[i:i + 480]) for i in range(0, max(1, len(wave_) - 480), 160)]
+    levels = np.asarray(levels) if levels else np.zeros(1)
+    segments = detect_speech(wave_, 16_000, VADConfig())
+    speech = sum(s.duration_seconds for s in segments)
+    report = {
+        "path": str(path), "seconds": round(seconds, 2),
+        "peak_dbfs": round(float(levels.max()), 1),
+        "median_dbfs": round(float(np.median(levels)), 1),
+        "noise_floor_dbfs": round(float(np.percentile(levels, 5)), 1),
+        "speech_segments": len(segments),
+        "speech_seconds": round(speech, 2),
+        "speech_fraction": round(speech / seconds, 2) if seconds else 0.0,
+        "spans": [(round(s.start_seconds, 2), round(s.end_seconds, 2)) for s in segments],
+    }
+    if show:
+        print(f"{report['seconds']}s  peak {report['peak_dbfs']} dBFS  "
+              f"median {report['median_dbfs']}  floor {report['noise_floor_dbfs']}")
+        print(f"offline VAD: {report['speech_seconds']}s speech in "
+              f"{report['speech_segments']} segment(s) "
+              f"({report['speech_fraction'] * 100:.0f}% of the clip)  {report['spans']}")
+    return report
 
 
 class NotebookAgent:
@@ -229,6 +271,146 @@ class NotebookAgent:
         if sink is not None and sink.audio.size:
             display(Audio(pcm_to_wav_bytes(sink.audio, self.synth.format.sample_rate),
                           autoplay=True))
+
+    def stream_turn(self, audio_path: str, *, max_tokens: int = 96, speak: bool = True,
+                    block_ms: int = 100, trailing_silence: float = 1.5,
+                    quiet: bool = False, **stream_options) -> dict:
+        """Replay a clip through ``StreamingSession`` and answer every final.
+
+        The online endpointer decides where each utterance ends, partials
+        appear as audio arrives, and a candidate final decoded during the
+        silence wait becomes the final at no extra cost. The clock advances
+        with the audio, not with wall time, so ASR compute does not distort
+        the endpoint decision — which is also why ``endpoint_to_final_ms``
+        below is reconstructed (silence waited + ASR after the endpoint)
+        rather than measured with a stopwatch.
+
+        ``trailing_silence`` is appended because a recording that stops the
+        instant you stop talking never contains ``min_silence_ms`` of quiet;
+        without it the utterance would only close at ``flush()``.
+        ``stream_options`` go to :class:`asr.streaming.StreamingConfig`, so
+        ``incremental_finals=True`` or ``semantic_endpointing=True`` can be
+        tried from the notebook.
+        """
+        self.load()
+        from agent.audio import DecodingBufferSink
+        from agent.turn import VoiceTurn
+        from asr.explicit.mel import load_audio
+        from asr.streaming import StreamingConfig, StreamingSession, UpdateKind
+
+        class _AudioClock:
+            now = 0.0
+
+            def __call__(self):
+                return self.now
+
+        wave_, seconds = load_audio(str(audio_path))
+        wave_ = np.concatenate([
+            wave_, np.zeros(int(trailing_silence * 16_000), dtype=np.float32),
+        ])
+        config = StreamingConfig(language=self.language, emit_partials=True, **stream_options)
+        clock = _AudioClock()
+        session = StreamingSession(self.asr, config, clock=clock)
+
+        block = 16_000 * block_ms // 1000
+        updates = []
+        for i in range(0, len(wave_), block):
+            chunk = wave_[i:i + block]
+            clock.now += len(chunk) / 16_000
+            updates.extend(session.push(chunk))
+        updates.extend(session.flush())
+
+        finals = [u for u in updates if u.kind == UpdateKind.FINAL and u.text.strip()]
+        trace = [{"kind": u.kind.value, "at": round(u.stream_seconds, 2),
+                  "asr_ms": round(u.asr_ms, 1), "text": u.text}
+                 for u in updates if u.text.strip()]
+
+        answers = []
+        for final in finals:
+            # Silence the endpointer waited, plus ASR that ran after the
+            # endpoint (zero when the candidate was reused).
+            wait_ms = max(0.0, (final.stream_seconds
+                                - (final.utterance_start_seconds + final.audio_seconds)) * 1000
+                          + config.vad.padding_ms)
+            endpoint_to_final = wait_ms + final.asr_ms_after_endpoint
+            sink = DecodingBufferSink(self.synth.format)
+            turn = VoiceTurn(self.llm_runner, self.synth, response_language="Hindi",
+                             llm_max_tokens=max_tokens, conversation=self.conversation)
+            result = turn.run(final.text, speech_end_to_transcript_ms=endpoint_to_final,
+                              sink=sink if speak else None)
+            answers.append({
+                "transcript": final.text, "response": result.response,
+                "state": result.state.value,
+                "endpoint_reason": final.endpoint_reason.value if final.endpoint_reason else None,
+                "from_candidate": final.from_candidate,
+                "utterance_seconds": round(final.audio_seconds, 2),
+                "asr_ms": round(final.asr_ms, 1),
+                "asr_after_endpoint_ms": round(final.asr_ms_after_endpoint, 1),
+                "silence_wait_ms": round(wait_ms, 1),
+                "endpoint_to_final_ms": round(endpoint_to_final, 1),
+                "first_token_ms": result.metrics.final_transcript_to_first_llm_token_ms,
+                "to_audio_ms": result.metrics.first_llm_token_to_playback_start_ms,
+                "response_latency_ms": result.metrics.response_latency_ms,
+                "sink": sink if speak else None,
+            })
+
+        record_ = {
+            "audio": str(audio_path), "audio_seconds": round(seconds, 2),
+            "vad": config.vad.as_dict(),
+            "utterances": len(finals),
+            "partials": sum(1 for u in updates if u.kind == UpdateKind.PARTIAL),
+            "candidates": sum(1 for u in updates if u.kind == UpdateKind.CANDIDATE),
+            "trace": trace,
+            "answers": [{k: v for k, v in a.items() if k != "sink"} for a in answers],
+        }
+        self.turns.extend({"audio": str(audio_path), "streaming": True,
+                           "asr_ms": a["asr_ms"], "asr_rtf": None,
+                           "first_token_ms": a["first_token_ms"],
+                           "to_audio_ms": a["to_audio_ms"],
+                           "response_latency_ms": a["response_latency_ms"],
+                           "turn_total_ms": None} for a in answers)
+        if not quiet:
+            self._show_stream(record_, answers)
+        return record_
+
+    def _show_stream(self, record_: dict, answers: list[dict]) -> None:
+        from IPython.display import Audio, Markdown, display
+
+        def ms(value):
+            return "—" if value is None else f"{value:.0f} ms"
+
+        vad = record_["vad"]
+        lines = [
+            f"**online endpointer** on {record_['audio_seconds']}s of audio: "
+            f"{record_['utterances']} utterance(s), {record_['partials']} partial(s), "
+            f"{record_['candidates']} candidate(s)",
+            f"_min_silence {vad['min_silence_ms']} ms · padding {vad['padding_ms']} ms · "
+            f"threshold {'adaptive' if vad['adaptive_threshold'] else vad['threshold_dbfs']}_",
+            "",
+        ]
+        for event in record_["trace"]:
+            lines.append(f"- `{event['kind']:9s}` @{event['at']:5.1f}s "
+                         f"({event['asr_ms']:.0f} ms) {event['text']}")
+        for a in answers:
+            lines += [
+                "", f"**You:** {a['transcript']}", f"**Agent:** {a['response']}", "",
+                "| segment | time |", "| --- | ---: |",
+                f"| silence wait (`min_silence_ms`) | {ms(a['silence_wait_ms'])} |",
+                f"| ASR after the endpoint | {ms(a['asr_after_endpoint_ms'])}"
+                + (" _(candidate reused)_" if a["from_candidate"] else "") + " |",
+                f"| → final transcript | {ms(a['endpoint_to_final_ms'])} |",
+                f"| transcript → first LLM token | {ms(a['first_token_ms'])} |",
+                f"| first token → audio out | {ms(a['to_audio_ms'])} |",
+                f"| **response latency** (as the user feels it) "
+                f"| **{ms(a['response_latency_ms'])}** |",
+                f"\n_utterance {a['utterance_seconds']}s, whole-utterance ASR "
+                f"{ms(a['asr_ms'])}, endpoint: {a['endpoint_reason']}_",
+            ]
+        display(Markdown("\n".join(lines)))
+        for a in answers:
+            if a["sink"] is not None and a["sink"].audio.size:
+                display(Audio(pcm_to_wav_bytes(a["sink"].audio,
+                                               self.synth.format.sample_rate), autoplay=True))
 
     # -- conversation -----------------------------------------------------
 

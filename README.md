@@ -209,12 +209,23 @@ Hindi/English audio (16 kHz WAV)
 ### In a notebook (no server, nothing to block)
 
 ```python
-from demo.notebook import NotebookAgent, record
+from demo.notebook import NotebookAgent, audio_report, record
 agent = NotebookAgent(adapter="/content/v2-final/best", tts="mms").load()
-agent.turn(record(5))        # speak; transcript, answer, latencies, audio appear inline
-agent.turn(record(5))        # a follow-up: memory makes "और मुंबई का?" resolve
+
+clip = record(6)
+agent.turn(clip)             # whole clip to Whisper: measures the model
+agent.stream_turn(clip)      # through the online endpointer: measures the agent
 agent.history(); agent.summary()
 ```
+
+`turn` hands the whole recording to Whisper, so its `response_latency_ms`
+has no endpoint term. `stream_turn` replays the clip through
+`StreamingSession` in 100 ms blocks, so the online endpointer decides where
+the utterance ends and the reported latency includes the silence wait the
+user actually sits through; it prints the partial/candidate/final trace and
+accepts `incremental_finals=True` / `semantic_endpointing=True` to try those
+paths. `audio_report(clip)` shows level and where the offline VAD finds
+speech.
 
 Recording uses the browser's own `MediaRecorder` through the kernel bridge
 and the reply plays as an `IPython.display.Audio` widget, so no port has to
