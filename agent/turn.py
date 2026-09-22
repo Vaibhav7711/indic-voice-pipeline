@@ -231,8 +231,9 @@ class VoiceTurn:
     def build_prompt(self, transcript: str) -> str:
         system = self.system_prompt or (
             f"You are a helpful voice assistant. Reply entirely in natural "
-            f"{self.response_language} and keep the answer brief — this will "
-            "be spoken aloud."
+            f"{self.response_language}, in one or two short sentences. Your "
+            "reply is spoken aloud, so a long first sentence leaves the user "
+            "waiting in silence. Never repeat the question back."
         )
         tokenizer = getattr(self.generator, "tokenizer", None)
         if self.conversation is not None:

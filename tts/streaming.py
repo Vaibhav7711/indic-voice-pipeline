@@ -106,6 +106,13 @@ def split_sentences(text: str, min_chars: int = MIN_SENTENCE_CHARS) -> list[str]
 _HARD_TERMINATORS = "।॥!?"
 _ANY_TERMINATOR_THEN_SPACE = re.compile(r"[।॥.!?…]+\s")
 
+#: Clause boundaries, used only when a sentence outgrows ``max_unit_chars``.
+#: Commas and semicolons first, then Hindi subordinators and conjunctions —
+#: places a speaker would draw breath anyway.
+_CLAUSE_PUNCT = re.compile(r"[,;:—–]\s")
+_CLAUSE_WORDS = ("कि ", "और ", "लेकिन ", "मगर ", "तो ", "क्योंकि ", "इसलिए ",
+                 "जब ", "अगर ", "या ", "फिर ", "जो ")
+
 
 class SentenceBuffer:
     """Turn a stream of text deltas into complete sentences, incrementally.
@@ -119,9 +126,19 @@ class SentenceBuffer:
     the next stage can act on. A token is not actionable; a sentence is.
     """
 
-    def __init__(self, min_chars: int = MIN_SENTENCE_CHARS, *, enabled: bool = True):
+    def __init__(self, min_chars: int = MIN_SENTENCE_CHARS, *, enabled: bool = True,
+                 max_unit_chars: int = 60):
         self.min_chars = min_chars
         self.enabled = enabled
+        #: Emit at a clause boundary once a sentence grows past this, instead
+        #: of waiting for its terminator. An LLM that answers in one long
+        #: sentence otherwise defeats sentence-level streaming entirely: with
+        #: a non-streaming backend (a local VITS model synthesises a whole
+        #: unit at once) nothing is audible until the last token is decoded
+        #: *and* the whole sentence is synthesised — measured at 4.1 s from
+        #: first token to first audio on one 85-character reply. The cost is
+        #: a breath in a slightly odd place; 0 disables it.
+        self.max_unit_chars = max_unit_chars
         self._buffer = ""
         self._pending = ""
         self.emitted: list[str] = []
@@ -132,7 +149,14 @@ class SentenceBuffer:
             return []
         out: list[str] = []
         while True:
-            cut = self._complete_prefix_end()
+            # Whichever comes first: the end of a complete sentence, or a
+            # clause boundary in a sentence that has outgrown the limit. The
+            # earliest cut wins — a non-streaming backend hands over a whole
+            # long sentence at once, and that is precisely the case where
+            # waiting for its terminator costs the most.
+            candidates = [c for c in (self._complete_prefix_end(),
+                                      self._long_sentence_cut()) if c is not None]
+            cut = min(candidates) if candidates else None
             if cut is None:
                 break
             piece = self._buffer[:cut].strip()
@@ -167,6 +191,28 @@ class SentenceBuffer:
         if self._buffer and self._buffer[-1] in _HARD_TERMINATORS:
             candidates.append(len(self._buffer))
         return min(candidates) if candidates else None
+
+    def _long_sentence_cut(self) -> int | None:
+        """Index to cut a sentence that has outgrown ``max_unit_chars``.
+
+        Prefers the last clause boundary inside the limit so the split lands
+        where a speaker would pause; returns None when there is no boundary
+        worth using, in which case the sentence is left to finish.
+        """
+        if not self.max_unit_chars or len(self._buffer) <= self.max_unit_chars:
+            return None
+        window = self._buffer[: self.max_unit_chars]
+        best = None
+        for match in _CLAUSE_PUNCT.finditer(window):
+            best = match.end()
+        for word in _CLAUSE_WORDS:
+            index = window.rfind(word)
+            if index > 0:
+                # Cut *before* the connective: it belongs to what follows.
+                best = max(best or 0, index)
+        if best is None or best < self.min_chars:
+            return None
+        return best
 
     def _merge(self, piece: str) -> list[str]:
         candidate = f"{self._pending} {piece}".strip() if self._pending else piece

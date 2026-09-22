@@ -295,6 +295,30 @@ Three things get called "streaming TTS" and only two are true here.
 Measure `first_chunk_ms` on your own network before quoting a number. A local
 TTS engine is the fix, not a wrapper.
 
+### One long sentence defeats sentence-level streaming
+
+`SentenceBuffer` also cuts at a **clause** boundary once a unit passes
+`max_unit_chars` (60). Without that, an LLM that answers in a single long
+sentence undoes the whole point of pipelining: nothing is speakable until
+the last token is decoded, and with a non-streaming backend (a local VITS
+model synthesises a whole unit at once) nothing is audible until that unit
+has also been synthesised. Measured on one live turn: an 85-character reply
+gave **4062 ms** from first LLM token to first audio, 84% of a 4.85 s
+response latency.
+
+The cut prefers a comma or semicolon, then a Hindi subordinator or
+conjunction (`कि`, `और`, `लेकिन`, `क्योंकि` …) — places a speaker draws
+breath anyway — and lands *before* the connective, which belongs to what
+follows. If there is no boundary inside the limit the sentence is left to
+finish rather than cut mid-word. The earliest available cut wins, so a
+complete long sentence handed over at once by a `generate()`-only backend is
+split too. The cost is a breath in a slightly odd place; `max_unit_chars=0`
+turns it off.
+
+The system prompts also now ask for one or two short sentences and forbid
+repeating the question, because the cheapest way to lower this latency is
+for the model not to produce a 30-token preamble.
+
 `split_sentences` is deliberately simple — no abbreviation model, no learned
 segmenter. A wrong split costs slightly odd prosody at one boundary; an
 over-engineered splitter costs latency on every turn. `MIN_SENTENCE_CHARS` is

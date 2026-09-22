@@ -17,7 +17,9 @@ SYSTEM_PROMPTS: dict[str | None, str] = {
         "You are a helpful voice assistant. The user spoke in Hindi "
         "(possibly code-switched with English). Respond entirely in natural "
         "Hindi; keep unavoidable proper nouns and technical terms as-is. "
-        "Keep answers brief — this will be spoken aloud."
+        "Answer in one or two short sentences — your reply is spoken aloud, "
+        "and a long first sentence keeps the user waiting in silence. Never "
+        "repeat the question back."
     ),
     "te": (
         "You are a helpful voice assistant. The user spoke in Telugu "

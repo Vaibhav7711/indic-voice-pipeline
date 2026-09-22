@@ -780,3 +780,61 @@ class TestSentenceBuffer:
         b = SentenceBuffer(enabled=False)
         assert b.feed("एक। दो। ") == []
         assert b.flush() == ["एक। दो।"]
+
+
+class TestLongSentenceSplitting:
+    def test_a_long_single_sentence_is_cut_at_a_clause_boundary(self):
+        """The live failure: one 85-character sentence meant nothing was
+        audible until the whole reply had been generated and synthesised."""
+        from tts.streaming import SentenceBuffer
+
+        reply = ("जो आपने सोचा है कि जिस भारत में आज हम रहते हैं, "
+                 "उसकी पहली ईंट कब और कहां रखी गई थी।")
+        buffer = SentenceBuffer(max_unit_chars=60)
+        out = []
+        for ch in reply:
+            out.extend(buffer.feed(ch))
+        assert out, "something must be speakable before the sentence ends"
+        first = out[0]
+        assert len(first) <= 60
+        # The cut lands at the comma, where a speaker would pause anyway.
+        assert first.endswith(",") or first.endswith("हैं,")
+        out.extend(buffer.flush())
+        assert "".join(out).replace(" ", "") == reply.replace(" ", "")
+
+    def test_disabled_limit_waits_for_the_terminator(self):
+        from tts.streaming import SentenceBuffer
+
+        long_one = "यह एक बहुत लंबा वाक्य है " * 5
+        buffer = SentenceBuffer(max_unit_chars=0)
+        assert buffer.feed(long_one) == []
+        assert buffer.flush() == [long_one.strip()]
+
+    def test_short_sentences_are_unaffected(self):
+        from tts.streaming import SentenceBuffer, split_sentences
+
+        text = "हाँ। मैं ठीक हूँ। आप कैसे हैं?"
+        buffer = SentenceBuffer(max_unit_chars=60)
+        out = []
+        for ch in text:
+            out.extend(buffer.feed(ch))
+        out.extend(buffer.flush())
+        assert out == split_sentences(text)
+
+    def test_no_clause_boundary_means_no_split(self):
+        """Rather than cut mid-word, a long unbroken run waits."""
+        from tts.streaming import SentenceBuffer
+
+        buffer = SentenceBuffer(max_unit_chars=20)
+        assert buffer.feed("क" * 50) == []
+        assert buffer.flush() == ["क" * 50]
+
+    def test_cut_is_before_a_connective_not_after(self):
+        from tts.streaming import SentenceBuffer
+
+        buffer = SentenceBuffer(min_chars=8, max_unit_chars=30)
+        out = buffer.feed("मुझे यह पसंद है लेकिन मैं जा नहीं सकता क्योंकि देर हो गई है।")
+        out.extend(buffer.flush())
+        assert len(out) >= 2
+        assert out[0] == "मुझे यह पसंद है"
+        assert out[1].startswith("लेकिन"), "the connective opens the next unit"
