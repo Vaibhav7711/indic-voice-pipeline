@@ -7,11 +7,21 @@ runs), streams each suite's log to disk, and writes ``manifest.json`` with
 the command, exit code, duration and output directory for every step.
 
     python scripts/bench_all.py --adapter /content/v2-final/best
-    python scripts/bench_all.py --adapter … --only guards,llm
+    python scripts/bench_all.py --adapter … --only guards_on,llm
 
-The order is deliberate: the regression check first, because today's decode
+The order is deliberate: the regression check first, because the decode
 guards changed serving behaviour and an unmeasured regression would make
 every later number meaningless.
+
+Built for a hosted notebook, where the session dies before the suite
+finishes more often than not:
+
+* **Resumable by default.** A step whose evidence already exists is skipped,
+  so re-running after a disconnect continues instead of starting over. Use
+  ``--force`` to redo everything, or ``--force-steps a,b`` for some.
+* ``--mirror DIR`` copies each step's evidence to ``DIR`` as soon as that
+  step finishes (point it at a mounted Drive). Without it, a session that
+  dies takes its results with it.
 
 Nothing here prints a conclusion. Read the JSON.
 """
@@ -20,6 +30,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import shutil
 import subprocess
 import sys
 import time
@@ -131,6 +142,54 @@ def steps(args) -> list[dict]:
     ]
 
 
+#: A step is "already done" when one of these exists inside its output
+#: directory — the file each harness writes last.
+EVIDENCE_FILES = ("metrics.json", "summary.json", "report.json", "model.bin")
+
+
+def is_done(step: dict) -> bool:
+    """Has this step already produced its evidence?
+
+    Deliberately checks for the *harness output*, not just the directory: an
+    interrupted run leaves the directory behind, and treating that as done
+    would silently skip a step that never finished.
+    """
+    out = step.get("out")
+    if out is None:
+        return False                      # cheap steps always re-run
+    out = Path(out)
+    if out.suffix == ".json":
+        return out.is_file()
+    if not out.is_dir():
+        return False
+    if any((out / name).is_file() for name in EVIDENCE_FILES):
+        return True
+    # A grid harness writes per-config subdirectories.
+    return any((child / "metrics.json").is_file()
+               for child in out.iterdir() if child.is_dir())
+
+
+def mirror_output(step: dict, mirror_root: Path) -> str | None:
+    """Copy a step's evidence somewhere that survives the session."""
+    out = step.get("out")
+    if out is None:
+        return None
+    out = Path(out)
+    if not out.exists():
+        return None
+    target = mirror_root / out.name
+    try:
+        if out.is_dir():
+            shutil.copytree(out, target, dirs_exist_ok=True,
+                            ignore=shutil.ignore_patterns("*.wav", "*.mp3", "*.bin", "*.pt"))
+        else:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(out, target)
+        return str(target)
+    except Exception as exc:  # noqa: BLE001 - a failed mirror must not fail the run
+        return f"mirror failed: {type(exc).__name__}: {exc}"
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("--adapter", default=DEFAULT_ADAPTER)
@@ -148,6 +207,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--only", default=None,
                         help="Comma-separated step names to run")
     parser.add_argument("--skip", default=None)
+    parser.add_argument("--force", action="store_true",
+                        help="Re-run steps whose evidence already exists")
+    parser.add_argument("--force-steps", default=None,
+                        help="Comma-separated step names to re-run even if done")
+    parser.add_argument("--mirror", default=None,
+                        help="Copy each step's evidence here as it finishes "
+                             "(e.g. a mounted Drive), so a dead session loses nothing")
     parser.add_argument("--logs", default="results/bench_logs")
     args = parser.parse_args(argv)
 
@@ -159,6 +225,12 @@ def main(argv: list[str] | None = None) -> int:
         unwanted = {n.strip() for n in args.skip.split(",")}
         plan = [s for s in plan if s["name"] not in unwanted]
 
+    force_steps = ({n.strip() for n in args.force_steps.split(",")}
+                   if args.force_steps else set())
+    mirror_root = Path(args.mirror) if args.mirror else None
+    if mirror_root:
+        mirror_root.mkdir(parents=True, exist_ok=True)
+
     logs = Path(args.logs)
     logs.mkdir(parents=True, exist_ok=True)
     manifest_path = Path(args.out_root) / "bench_manifest.json"
@@ -169,6 +241,19 @@ def main(argv: list[str] | None = None) -> int:
     print(f"{len(plan)} step(s); logs in {logs}\n")
     for index, step in enumerate(plan, 1):
         log_path = logs / f"{step['name']}.log"
+        if not args.force and step["name"] not in force_steps and is_done(step):
+            print(f"[{index}/{len(plan)}] {step['name']}: already done "
+                  f"({step['out']}) — skipping", flush=True)
+            records.append({"step": step["name"], "decides": step["decides"],
+                            "cmd": step["cmd"], "returncode": 0, "seconds": 0.0,
+                            "skipped": True, "log": str(log_path),
+                            "out": str(step["out"]) if step["out"] else None,
+                            "tail": "skipped: evidence already present"})
+            manifest_path.write_text(
+                json.dumps({"adapter": args.adapter,
+                            "total_minutes": round((time.time() - started) / 60, 1),
+                            "steps": records}, indent=2) + "\n", encoding="utf-8")
+            continue
         print(f"[{index}/{len(plan)}] {step['name']}: {step['decides']}", flush=True)
         begin = time.time()
         with log_path.open("w", encoding="utf-8") as handle:
@@ -184,11 +269,13 @@ def main(argv: list[str] | None = None) -> int:
             tail = " | ".join(lines[-3:])[:300]
         except Exception:  # noqa: BLE001
             pass
+        mirrored = mirror_output(step, mirror_root) if mirror_root else None
         records.append({
             "step": step["name"], "decides": step["decides"],
             "cmd": step["cmd"], "returncode": proc.returncode,
-            "seconds": round(seconds, 1), "log": str(log_path),
+            "seconds": round(seconds, 1), "skipped": False, "log": str(log_path),
             "out": str(step["out"]) if step["out"] else None,
+            "mirrored": mirrored,
             "tail": tail,
         })
         status = "ok" if proc.returncode == 0 else f"FAILED ({proc.returncode})"
@@ -201,8 +288,10 @@ def main(argv: list[str] | None = None) -> int:
                         "steps": records}, indent=2) + "\n", encoding="utf-8")
 
     failed = [r["step"] for r in records if r["returncode"]]
+    skipped = [r["step"] for r in records if r.get("skipped")]
     print(f"\n{len(records) - len(failed)}/{len(records)} step(s) ok in "
-          f"{(time.time() - started) / 60:.0f} min")
+          f"{(time.time() - started) / 60:.0f} min"
+          + (f"; {len(skipped)} skipped as already done: {skipped}" if skipped else ""))
     if failed:
         print(f"failed: {failed} — see {logs}")
     print(f"manifest: {manifest_path}")
