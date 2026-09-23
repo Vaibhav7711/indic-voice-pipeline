@@ -25,8 +25,14 @@ them; the numeric table alone must not pick the model.
 Usage::
 
     python -m benchmarks.llm_bakeoff \\
-        --models Qwen/Qwen3-0.6B,Qwen/Qwen3-1.7B,google/gemma-3-1b-it,Qwen/Qwen3-4B \\
+        --models Qwen/Qwen3-0.6B,Qwen/Qwen3-1.7B,Qwen/Qwen3-4B \\
         --out-dir results/llm_bakeoff/t4
+
+A ``name:4bit`` or ``name:8bit`` spec loads that candidate quantized, so the
+cost of quantization is measured rather than assumed. On a small card this is
+the comparison that matters: ``Qwen/Qwen3-1.7B,Qwen/Qwen3-1.7B:4bit`` shows
+what 4-bit costs in Hindi quality and in ms/token for the model you could
+actually deploy alongside Whisper.
 
 Gated models (Gemma, Llama) need ``huggingface-cli login`` after accepting
 the licence on the Hub. Models are loaded one at a time and freed between.
@@ -101,15 +107,29 @@ def summarize(rows: list[dict]) -> dict:
     }
 
 
+def parse_model_spec(spec: str) -> tuple[str, str | None]:
+    """``"Qwen/Qwen3-1.7B:4bit"`` → ``("Qwen/Qwen3-1.7B", "4bit")``.
+
+    Only a trailing ``:4bit`` / ``:8bit`` is a quantization marker; the colon
+    in a Hub id (there is none) or a local path on Windows is left alone.
+    """
+    for suffix in ("4bit", "8bit"):
+        if spec.endswith(f":{suffix}"):
+            return spec[: -(len(suffix) + 1)], suffix
+    return spec, None
+
+
 def run_model(model_name: str, prompts: list[str], *, max_new_tokens: int,
-              dtype: str, language: str, compile_decode: bool = False) -> tuple[list[dict], dict]:
+              dtype: str, language: str, compile_decode: bool = False,
+              quantization: str | None = None) -> tuple[list[dict], dict]:
     import torch
 
     from llm import LLMRunner, build_chat_prompt, load_llm, system_prompt_for
     from tts.streaming import SentenceBuffer
 
     t0 = time.perf_counter()
-    loaded = load_llm(model_name, dtype=None if dtype == "auto" else getattr(torch, dtype))
+    loaded = load_llm(model_name, dtype=None if dtype == "auto" else getattr(torch, dtype),
+                      quantization=quantization)
     dtype = str(loaded.dtype).replace("torch.", "")
     load_s = time.perf_counter() - t0
     runner = LLMRunner(loaded.model, loaded.tokenizer, loaded.device,
@@ -163,6 +183,7 @@ def run_model(model_name: str, prompts: list[str], *, max_new_tokens: int,
 
     info = {
         "model": model_name, "dtype": dtype, "compiled_decode": compile_decode,
+        "quantization": quantization,
         "params_millions": round(params / 1e6),
         "load_seconds": round(load_s, 1),
         "peak_vram_gib": round(torch.cuda.max_memory_allocated(loaded.device) / 2**30, 2),
@@ -198,11 +219,12 @@ def main(argv: list[str] | None = None) -> int:
     summary: dict = {}
     for model_name in models:
         print(f"\n=== {model_name} ===")
-        slug = model_name.replace("/", "__")
+        slug = model_name.replace("/", "__").replace(":", "-")
+        name, quantization = parse_model_spec(model_name)
         try:
-            rows, info = run_model(model_name, prompts, max_new_tokens=args.max_new_tokens,
+            rows, info = run_model(name, prompts, max_new_tokens=args.max_new_tokens,
                                    dtype=args.dtype, language=args.language,
-                                   compile_decode=args.compile)
+                                   compile_decode=args.compile, quantization=quantization)
         except Exception as exc:  # noqa: BLE001 - one model failing must not end the run
             print(f"  FAILED to run: {type(exc).__name__}: {exc}")
             summary[model_name] = {"error": f"{type(exc).__name__}: {exc}"}

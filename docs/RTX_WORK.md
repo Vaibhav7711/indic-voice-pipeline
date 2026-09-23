@@ -85,28 +85,69 @@ It should contain `adapter_config.json` and `adapter_model.safetensors`.
 Base model is `openai/whisper-large-v3-turbo` — `--adapter` also accepts a
 Hub id directly if you publish it flat.
 
-### 4. VRAM budget — this decides the LLM
+### 4. VRAM budget — 6 GB, and it decides the LLM
+
+**This card has 6 GB**, less whatever is driving the display. Check the
+baseline before planning anything:
+
+```bash
+nvidia-smi --query-gpu=name,memory.total,memory.used --format=csv
+```
 
 fp16/bf16 resident weights, before KV cache and activations:
 
 | Component | VRAM |
 | --- | ---: |
-| whisper-large-v3-turbo + merged LoRA | 1.6 GB |
-| MMS-TTS Hindi (VITS, 36M) | 0.15 GB |
-| Qwen3-0.6B | 1.2 GB |
-| Qwen3-1.7B | 3.4 GB |
-| Qwen3-4B | 8.0 GB |
+| whisper-large-v3-turbo + merged LoRA | 1.62 GB |
+| the same via CTranslate2 `int8_float16` | ~0.8 GB |
+| MMS-TTS Hindi (VITS, 36M) | 0.07 GB |
+| Qwen3-0.6B fp16 | 1.15 GB |
+| Qwen3-1.7B fp16 | 3.17 GB |
+| Qwen3-1.7B 4-bit NF4 | ~0.87 GB |
+| Qwen3-4B fp16 | 7.45 GB |
 
-- **8 GB card** — turbo + Qwen3-1.7B + MMS ≈ 5.2 GB resident, comfortable
-  with KV cache. **Qwen3-4B does not fit** alongside Whisper in fp16; only
-  4-bit, which measures a different model, so leave it out of the bake-off
-  rather than quietly quantizing one candidate.
-- **16 GB card** — Qwen3-4B fp16 fits alongside everything (≈ 9.8 GB). Include
-  it; it is a genuinely different quality tier.
+**The distinction that matters: what the bake-off can measure is not what the
+agent can deploy.** `llm_bakeoff` loads one model at a time and frees it, so
+it can benchmark Qwen3-1.7B in fp16 quite happily. The agent cannot: Whisper
+has to stay resident, because the streaming session needs it for the next
+utterance's partials. Offloading it per turn (`pipeline/memory.py` supports
+sequential mode) would add ~0.5–1 s of PCIe transfer to every turn and break
+partials — the wrong trade for a voice agent.
 
-`pipeline/memory.py` picks concurrent vs sequential loading by measurement at
-construction time, so it will adapt — but the bake-off loads one model at a
-time and will OOM on a candidate that cannot fit.
+Concurrent combinations, with peak measured at ~2.9 GiB for a comparable
+stack on a T4:
+
+| Agent stack | Weights | On 6 GB |
+| --- | ---: | --- |
+| turbo + Qwen3-0.6B + MMS | 2.7 GB | fits easily — but 0.6B is the known weak link |
+| turbo + **Qwen3-1.7B 4-bit** + MMS | 2.4 GB | **fits with headroom — the target** |
+| turbo + Qwen3-1.7B fp16 + MMS | 4.7 GB | too tight once KV cache and activations land |
+| CT2-int8 turbo + Qwen3-1.7B 4-bit + MMS | 1.7 GB | most headroom; needs the engine check to pass first |
+| anything + Qwen3-4B | 7.5 GB+ | out of reach |
+
+So on this card the engine tier earns its place on **memory** grounds, not
+only speed: CTranslate2 `int8_float16` halves Whisper's footprint. And 4-bit
+quantization is now justified — note the README's "why LoRA, not QLoRA"
+argument was specifically *there is no memory problem to solve*; here there
+is one.
+
+```bash
+pip install bitsandbytes          # 4-bit/8-bit loading
+```
+
+**Measure the quantization cost rather than assuming it.** The bake-off takes
+a `model:4bit` spec, so run the same model both ways:
+
+```bash
+python -m benchmarks.llm_bakeoff \
+    --models Qwen/Qwen3-0.6B,Qwen/Qwen3-1.7B,Qwen/Qwen3-1.7B:4bit \
+    --out-dir results/llm_bakeoff/rtx
+```
+
+That gives three things to compare: the current model, the best plausible
+model unquantized (as a quality reference, even though it cannot be
+deployed here), and the one you could actually ship. Judge Hindi quality by
+reading `*.outputs.jsonl`, not the table.
 
 ## Verify before measuring
 
@@ -131,7 +172,7 @@ someone. Two entry points:
 
 ```bash
 python scripts/bench_all.py --adapter "$ADAPTER" \
-    --llm-models Qwen/Qwen3-0.6B,Qwen/Qwen3-1.7B      # add Qwen3-4B only on 16 GB
+    --llm-models Qwen/Qwen3-0.6B,Qwen/Qwen3-1.7B,Qwen/Qwen3-1.7B:4bit
 ```
 
 Runs ten suites in the order of what they decide, tolerates a failing step,
@@ -152,8 +193,15 @@ multi-minute download that looks like a hang.
 **Live, with real audio:**
 
 ```bash
-python scripts/live_agent.py --adapter "$ADAPTER" --tts mms --llm-compile
+python scripts/live_agent.py --adapter "$ADAPTER" --tts mms \
+    --llm-model Qwen/Qwen3-1.7B        # add --llm-compile only if the sweep says it helps
 ```
+
+On 6 GB, pass the 4-bit LLM once the bake-off has justified it (the loader
+takes `quantization="4bit"`; wire it through `--llm-model` handling if you
+adopt it). Watch `nvidia-smi` on the first live turn: if peak approaches
+total, drop to Qwen3-0.6B or convert Whisper to CT2 int8 rather than letting
+the allocator thrash.
 
 Microphone → streaming ASR → LLM → TTS → speakers, barge-in on a new speech
 onset, every turn appended to `results/live/turns.jsonl`. **This is the row of
@@ -166,6 +214,7 @@ sweep says compilation is not a win here.
 | --- | --- | --- |
 | Did today's decode guards (no-speech, loop guard) regress WER? | `bench_all.py --only guards_on,guards_off,compare_guards` | `results/eval/compare-guards.json` |
 | Which LLM? **The largest open quality question** — Qwen3-0.6B answers Hindi questions by restating them | `bench_all.py --only llm` | `results/llm_bakeoff/summary.json` + every answer in `*.outputs.jsonl` |
+| What does 4-bit cost in quality and ms/token? It is what makes 1.7B fit here | same run, `Qwen/Qwen3-1.7B:4bit` in `--llm-models` | same files, `quantization` field per entry |
 | edge-tts or local MMS? | `--only tts` | `results/tts_bakeoff/summary.json` |
 | Incremental finals / semantic endpointing on? | `--only streaming` | `results/streaming_eval/*/metrics.json` |
 | CTranslate2 speedup, and does it match the reference? | `--only ct2_convert,ct2_check` | the sweep report |
