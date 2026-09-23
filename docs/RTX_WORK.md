@@ -1,263 +1,260 @@
-# Working on the local RTX box
+# Agent brief: benchmarking this project on the local RTX box
 
-Written for whoever sits down at the RTX 4060 machine with this repo freshly
-cloned. It is self-contained: nothing here depends on the Colab/Kaggle
-sessions the project was built in.
+You are an autonomous coding agent working in this repository on a machine
+with an RTX 4060 (**6 GB VRAM**), Ubuntu under WSL2 with a native Ubuntu dual
+boot available. There is **no human in the loop**. Work through the plan
+below, record every result as a file, commit the evidence, and stop with a
+written note when you hit something that genuinely needs a person.
 
-## Why this machine exists
+Your job is not to make the project look good. It is to turn a list of
+unmeasured questions into recorded answers, and to say plainly when an answer
+is worse than hoped.
 
-Everything in this project was developed on hosted notebooks, and four things
-were simply not testable there. They are the whole reason for moving:
+## Read first, in this order
 
-| Blocked in a hosted notebook | Works here |
-| --- | --- |
-| A reachable URL — the `gradio.live` tunnel, the Colab port proxy and SSR all failed in turn | `http://localhost:7860` |
-| A real microphone and real speakers | `sounddevice` gets actual devices |
-| Barge-in against a device that has already buffered audio | `stream.abort()` on a real stream |
-| CUDA graphs / `torch.compile` — on a T4 the compiled decode was **0.9× (slower)**, and inductor logged "Not enough SMs" | Ada (sm_89) has native bf16; re-measure, do not assume |
+1. `README.md` — what the system is, the repo map, the correctness policy.
+2. `docs/EXPERIMENTS.md` — the ledger. Every number the project claims, with
+   its conditions. This is where your results go.
+3. `docs/STREAMING.md` — the streaming session, the agent turn, and which
+   latency fields are measured versus approximated.
+4. `git log --oneline -40` — the commit messages record *why* things changed.
 
-What carries over unchanged: **WER and CER are device-independent**, so the
-numbers in `docs/EXPERIMENTS.md` stand. **Every latency number does not** —
-re-measure anything you intend to quote.
+## Current state
 
-## Setup
+| Component | Status | Evidence |
+| --- | --- | --- |
+| ASR (whisper-large-v3-turbo + Hindi LoRA v2) | **shipped**: 23.83% WER, 8.43% CER, 694 ms p50, RTF 0.066 on 300 seeded FLEURS-hi test clips | `docs/EXPERIMENTS.md`, `results/eval/` |
+| Explicit encoder/decoder runtime | validated token-identical to `generate()` on real Hindi audio | `results/gpu_validation/report.json` |
+| Streaming ASR + adaptive VAD | validated on 100 clips; streaming at offline parity | `results/streaming_eval/` |
+| Agent turn (LLM stream → sentences → TTS → playback, barge-in) | logic validated; one live turn measured at 1.57 s response latency | `results/gpu_validation/report.json` |
+| Dialogue memory | unit-tested only | — |
+| ASR decode guards (no-speech, repetition loop) | **added, effect on WER never measured** | none — this is task 1 |
+| LLM choice | **open.** Qwen3-0.6B answers Hindi questions by restating them | none |
+| TTS backend (edge vs local MMS) | **open** | none |
+| Incremental finals, semantic endpointing | **open**, both default off | none |
+| CTranslate2 engine tier | validated on CPU only (fp32 token-identical, int8 2.7× faster) | commit `e52cc08` |
+| Compiled decode (static cache + CUDA graphs) | token-identical, but **0.9× — slower — on a T4**; unmeasured on Ada | `results/gpu_validation/report.json` |
+| Live turns with real microphone and speakers | **never done** | none |
+| `data/hard_set/` | empty; the ledger requires per-category numbers for a result entry | — |
+| ASR v3 re-run | decided **not** to do; recorded with reasons | `docs/EXPERIMENTS.md` |
 
-### 1. Environment
+550 automated tests pass on CPU; 8 more are GPU-gated and will run here.
+
+## Environment bring-up
+
+Run these and check each gate before proceeding. If a gate fails, fix it or
+record it as blocked — do not proceed past a failing gate and report numbers
+from a broken environment.
 
 ```bash
-git clone <this repo> indic-voice-pipeline && cd indic-voice-pipeline
-python -m venv .venv && . .venv/bin/activate        # Windows: .venv\Scripts\activate
-```
-
-Install a CUDA build of torch **first** (the project does not pin torch on
-purpose — hosted runtimes ship their own):
-
-```bash
+python -m venv .venv && . .venv/bin/activate
 pip install torch --index-url https://download.pytorch.org/whl/cu124
-python -c "import torch; print(torch.__version__, torch.cuda.is_available(), torch.cuda.get_device_name(0))"
-python -c "import torch; print('bf16 native:', torch.cuda.is_bf16_supported())"   # expect True on Ada
+pip install -e ".[dev,demo,audio]" faster-whisper ctranslate2 bitsandbytes
+python scripts/preflight.py
+nvidia-smi --query-gpu=name,memory.total,memory.used --format=csv
+python -c "import torch; print('bf16 native:', torch.cuda.is_bf16_supported())"
 ```
 
-Then the project and its extras:
+| Gate | Expected | If it fails |
+| --- | --- | --- |
+| `torch.cuda.is_available()` | True | stop; record blocked |
+| `bf16 native` | True on Ada | note it; `pick_dtype` adapts either way |
+| free VRAM at idle | ≥ 5 GB | a desktop session may be holding VRAM; note the baseline and subtract it from every budget below |
+| `pytest` | 550 passed, 8 skipped | fix before benchmarking; a failing suite invalidates everything after it |
+
+### The adapter
+
+Not in git. Fetch from the Hub checkpoint repo the training run wrote to:
 
 ```bash
-pip install -e ".[dev,demo,audio]"
-pip install faster-whisper ctranslate2        # the CTranslate2 engine tier
-python scripts/preflight.py
+huggingface-cli login
+python - <<'PY'
+from huggingface_hub import snapshot_download, whoami
+repo = f"{whoami()['name']}/whisper-turbo-hindi-lora-ckpt"
+print("adapter:", snapshot_download(repo, allow_patterns=["best/*"],
+                                    local_dir="models/v2-final") + "/best")
+PY
+export ADAPTER=$PWD/models/v2-final/best
 ```
 
-`bf16 native: True` matters: `llm/loader.py::pick_dtype` will now choose
-bf16, where on the T4 it deliberately fell back to fp16 because sm_75 has no
-bf16 tensor cores (a 0.6B model was decoding at ~41 ms/token because of it).
+Verify it contains `adapter_config.json` and `adapter_model.safetensors`.
 
-### 2. Audio devices
+### Audio: which machine you are on decides what you can test
 
 ```bash
 python -c "import sounddevice as sd; print(sd.query_devices())"
 ```
 
-- **Linux** — if this errors, `sudo apt install libportaudio2`. Confirm both
-  an input and an output device are listed.
-- **Windows** — the `sounddevice` wheel bundles PortAudio; WASAPI devices
-  should appear with no extra install.
-- **WSL2** — there is normally **no audio device and no microphone**. Do not
-  fight it: run the live tests from Windows-native Python instead, or use the
-  file-replay paths (`--input-wav`, `--sink buffer`) and accept that real
-  barge-in stays unmeasured. Check before planning a session around it.
+- **Devices listed (native Ubuntu, or WSL2 with working WSLg audio):** the
+  live-audio tasks are available to you. Run them.
+- **No devices (typical WSL2):** the live microphone and speaker tasks are
+  **blocked and must not be faked**. Do the file-replay equivalents
+  (`scripts/live_agent.py --input-wav <clip> --sink buffer`), record that
+  real barge-in against a device buffer remains unmeasured, and write the
+  reason into `results/BLOCKED.md`. Do not report a file replay as a live
+  turn.
 
-### 3. The v2 adapter
+## The 6 GB budget — this constrains what you may deploy
 
-The shipped adapter is **not in git** (weights do not belong there). It lives
-in the private Hub checkpoint repo the training run wrote to, under `best/`:
-
-```bash
-huggingface-cli login                      # a token with read access
-python - <<'PY'
-from huggingface_hub import snapshot_download, whoami
-repo = f"{whoami()['name']}/whisper-turbo-hindi-lora-ckpt"
-path = snapshot_download(repo, allow_patterns=["best/*"], local_dir="models/v2-final")
-print("adapter:", path + "/best")
-PY
-export ADAPTER=$PWD/models/v2-final/best        # Windows: set ADAPTER=...
-```
-
-It should contain `adapter_config.json` and `adapter_model.safetensors`.
-Base model is `openai/whisper-large-v3-turbo` — `--adapter` also accepts a
-Hub id directly if you publish it flat.
-
-### 4. VRAM budget — 6 GB, and it decides the LLM
-
-**This card has 6 GB**, less whatever is driving the display. Check the
-baseline before planning anything:
-
-```bash
-nvidia-smi --query-gpu=name,memory.total,memory.used --format=csv
-```
-
-fp16/bf16 resident weights, before KV cache and activations:
-
-| Component | VRAM |
-| --- | ---: |
-| whisper-large-v3-turbo + merged LoRA | 1.62 GB |
-| the same via CTranslate2 `int8_float16` | ~0.8 GB |
-| MMS-TTS Hindi (VITS, 36M) | 0.07 GB |
-| Qwen3-0.6B fp16 | 1.15 GB |
-| Qwen3-1.7B fp16 | 3.17 GB |
-| Qwen3-1.7B 4-bit NF4 | ~0.87 GB |
-| Qwen3-4B fp16 | 7.45 GB |
-
-**The distinction that matters: what the bake-off can measure is not what the
-agent can deploy.** `llm_bakeoff` loads one model at a time and frees it, so
-it can benchmark Qwen3-1.7B in fp16 quite happily. The agent cannot: Whisper
-has to stay resident, because the streaming session needs it for the next
-utterance's partials. Offloading it per turn (`pipeline/memory.py` supports
-sequential mode) would add ~0.5–1 s of PCIe transfer to every turn and break
-partials — the wrong trade for a voice agent.
-
-Concurrent combinations, with peak measured at ~2.9 GiB for a comparable
-stack on a T4:
+`llm_bakeoff` loads one model at a time, so it can benchmark models the agent
+cannot run. The agent needs Whisper **and** the LLM resident together, because
+the streaming session needs Whisper for the next utterance's partials;
+sequential offload would add ~0.5–1 s per turn and break partials.
 
 | Agent stack | Weights | On 6 GB |
 | --- | ---: | --- |
-| turbo + Qwen3-0.6B + MMS | 2.7 GB | fits easily — but 0.6B is the known weak link |
-| turbo + **Qwen3-1.7B 4-bit** + MMS | 2.4 GB | **fits with headroom — the target** |
-| turbo + Qwen3-1.7B fp16 + MMS | 4.7 GB | too tight once KV cache and activations land |
-| CT2-int8 turbo + Qwen3-1.7B 4-bit + MMS | 1.7 GB | most headroom; needs the engine check to pass first |
+| turbo + Qwen3-0.6B + MMS | 2.7 GB | fits; 0.6B is the known weak link |
+| turbo + **Qwen3-1.7B 4-bit** + MMS | 2.4 GB | **the target if the bake-off justifies it** |
+| turbo + Qwen3-1.7B fp16 + MMS | 4.7 GB | too tight with KV cache and activations |
+| CT2-int8 turbo + 1.7B 4-bit + MMS | 1.7 GB | most headroom; requires `ct2_check` to pass |
 | anything + Qwen3-4B | 7.5 GB+ | out of reach |
 
-So on this card the engine tier earns its place on **memory** grounds, not
-only speed: CTranslate2 `int8_float16` halves Whisper's footprint. And 4-bit
-quantization is now justified — note the README's "why LoRA, not QLoRA"
-argument was specifically *there is no memory problem to solve*; here there
-is one.
+`llm.loader.estimate_vram_gib(param_millions, quantization)` gives these
+numbers; recompute rather than trusting the table if a model changes.
 
-```bash
-pip install bitsandbytes          # 4-bit/8-bit loading
-```
+## Plan
 
-**Measure the quantization cost rather than assuming it.** The bake-off takes
-a `model:4bit` spec, so run the same model both ways:
+### Phase 1 — regression check (do this first)
 
-```bash
-python -m benchmarks.llm_bakeoff \
-    --models Qwen/Qwen3-0.6B,Qwen/Qwen3-1.7B,Qwen/Qwen3-1.7B:4bit \
-    --out-dir results/llm_bakeoff/rtx
-```
-
-That gives three things to compare: the current model, the best plausible
-model unquantized (as a quality reference, even though it cannot be
-deployed here), and the one you could actually ship. Judge Hindi quality by
-reading `*.outputs.jsonl`, not the table.
-
-## Verify before measuring
-
-```bash
-pytest                                    # 545 tests; 8 GPU-gated ones now run
-python scripts/gpu_validation.py --whisper-model openai/whisper-large-v3-turbo \
-    --adapter "$ADAPTER" --out-dir results/gpu_validation-rtx
-```
-
-16 checks, pass/fail JSON. Two expected results worth knowing so you do not
-chase them: `language_detection_base_model` may **warn** (base Whisper flips
-hi↔ur on short clips — expected, and the v2 adapter passes unrestricted), and
-`llm_compiled_matches_eager` reports a speedup that was **below 1.0 on the
-T4**. If it is now above 1.0, that is a real Ada finding worth recording.
-
-## The measurement surface
-
-Everything measured here should land in a file, not in a terminal read out to
-someone. Two entry points:
-
-**Batch — unattended, ~2 h:**
+The decode guards added in commit `55f5c1e` (no-speech threshold 0.6,
+repetition loop guard) changed serving behaviour and their effect on WER was
+never measured. A no-speech suppression on a clip that *does* contain speech
+deletes a whole utterance. Everything downstream is meaningless if this is a
+regression.
 
 ```bash
 python scripts/bench_all.py --adapter "$ADAPTER" \
-    --llm-models Qwen/Qwen3-0.6B,Qwen/Qwen3-1.7B,Qwen/Qwen3-1.7B:4bit
+    --only guards_on,guards_off,compare_guards
 ```
 
-Runs ten suites in the order of what they decide, tolerates a failing step,
-writes a log per step and `results/bench_manifest.json`. It prints no
-conclusions.
+Read `results/eval/compare-guards.json` and the `decode_guards_fired` block in
+each `metrics.json`.
 
-**Interactive — the URL that was the point of moving:**
+- **WER unchanged or better, guards fired on 0–2 clips** → keep the defaults,
+  record the numbers, continue.
+- **WER worse, or no-speech fired on clips whose reference is non-empty** →
+  this is a regression you must fix, not report around. Raise
+  `--no-speech-threshold` until it fires only on genuinely empty clips,
+  re-run, and record both the old and new values in the ledger.
+
+### Phase 2 — the open questions
 
 ```bash
-python demo/app.py --no-share --preload        # http://localhost:7860
+python scripts/bench_all.py --adapter "$ADAPTER" \
+    --llm-models Qwen/Qwen3-0.6B,Qwen/Qwen3-1.7B,Qwen/Qwen3-1.7B:4bit \
+    --skip guards_on,guards_off,compare_guards
 ```
 
-The Turn tab runs the same `VoiceTurn` as the agent, so its latency table is
-what the agent measures; the Stream tab feeds the real `StreamingSession`.
-`--preload` loads the models before serving so the first turn is not a
-multi-minute download that looks like a hang.
+~2 hours unattended. It writes a log per step and
+`results/bench_manifest.json`. A failing step does not stop the rest; check
+the manifest for non-zero exit codes and read that step's log before
+concluding anything about it.
 
-**Live, with real audio:**
+### Phase 3 — live turns
+
+Only if audio devices exist. Twenty turns, varied utterance lengths, at least
+three deliberate barge-ins:
 
 ```bash
 python scripts/live_agent.py --adapter "$ADAPTER" --tts mms \
-    --llm-model Qwen/Qwen3-1.7B        # add --llm-compile only if the sweep says it helps
+    --llm-model <winner from phase 2> --log results/live/turns.jsonl
 ```
 
-On 6 GB, pass the 4-bit LLM once the bake-off has justified it (the loader
-takes `quantization="4bit"`; wire it through `--llm-model` handling if you
-adopt it). Watch `nvidia-smi` on the first live turn: if peak approaches
-total, drop to Qwen3-0.6B or convert Whisper to CT2 int8 rather than letting
-the allocator thrash.
+Then summarise the distribution — not one turn — of
+`response_latency_ms` and its four segments. One turn is an anecdote; the
+project has already been misled once by quoting a single number.
 
-Microphone → streaming ASR → LLM → TTS → speakers, barge-in on a new speech
-onset, every turn appended to `results/live/turns.jsonl`. **This is the row of
-the test matrix that only this machine can do.** Drop `--llm-compile` if the
-sweep says compilation is not a win here.
+## Pre-registered decision rules
 
-## Open questions and what settles each
+These are fixed **now**, before you see the results, so that a disappointing
+number cannot be reinterpreted into a success. Apply them literally.
 
-| Question | Command | Recorded in |
+| Question | Adopt the change if | Otherwise |
 | --- | --- | --- |
-| Did today's decode guards (no-speech, loop guard) regress WER? | `bench_all.py --only guards_on,guards_off,compare_guards` | `results/eval/compare-guards.json` |
-| Which LLM? **The largest open quality question** — Qwen3-0.6B answers Hindi questions by restating them | `bench_all.py --only llm` | `results/llm_bakeoff/summary.json` + every answer in `*.outputs.jsonl` |
-| What does 4-bit cost in quality and ms/token? It is what makes 1.7B fit here | same run, `Qwen/Qwen3-1.7B:4bit` in `--llm-models` | same files, `quantization` field per entry |
-| edge-tts or local MMS? | `--only tts` | `results/tts_bakeoff/summary.json` |
-| Incremental finals / semantic endpointing on? | `--only streaming` | `results/streaming_eval/*/metrics.json` |
-| CTranslate2 speedup, and does it match the reference? | `--only ct2_convert,ct2_check` | the sweep report |
-| Do CUDA graphs pay off on Ada? | the sweep | `llm_compiled_matches_eager` |
-| What is the real conversational latency, as a distribution? | 20 live turns | `results/live/turns.jsonl` |
+| Incremental finals (`early-incr`) | `wer_vs_offline` rises < 1.0 pp versus `early` **and** mean `endpoint_to_final_ms` drops | keep off, record the measured cost |
+| Semantic endpointing (`early-sem`) | `clips_split` drops from 16/100 to single digits at < 150 ms mean added `endpoint_to_final_ms` | keep off |
+| LLM | highest `devanagari_ratio_mean` with **zero** `think_leaks`, `first_sentence_ms_p50` < 800 ms, and a stack that fits the 6 GB table | keep Qwen3-0.6B and record why the alternatives failed |
+| 4-bit quantization | 4-bit's Hindi quality is not visibly worse in `outputs.jsonl` **and** it is the only way the chosen model fits | use fp16 if it fits, else the smaller model |
+| TTS backend | lower `first_chunk_ms_p50` with acceptable audio in the saved WAVs | keep edge-tts and record the local model's cost |
+| CTranslate2 engine | `ct2_matches_explicit` passes (token-identical at fp16, ≤ 5% WER apart at int8) **and** speedup > 1.3× | keep the explicit runner |
+| Compiled decode | `llm_compiled_matches_eager` shows tokens match **and** speedup > 1.1× | keep it off; record the Ada number next to the T4's 0.9× |
 
-Decision rules already written down, so they are not chosen after seeing the
-numbers: `early-incr` becomes default if `WER off` rises < 1 pt versus `early`
-and `end→final` drops; `early-sem` / `full` become default if split clips drop
-from 16/100 to single digits at under ~150 ms average cost.
+Quality judgements that need ears (Hindi fluency of an LLM answer, TTS voice
+quality) are the one place you must not decide alone: score what you can
+automatically, write the candidates and their outputs into the ledger, and
+mark the choice **pending human listening**.
 
-## House rules that earned their place
+## Recording protocol
 
-Each of these exists because ignoring it cost real time on this project:
+Every result is a file in the repo. A number that exists only in a terminal
+did not happen.
 
-1. **Measure before attributing.** A 4062 ms segment was called a TTS problem;
-   it was mostly the LLM still generating. Instrument the split, then decide.
-   Any field that cannot be measured is `None`, never `0.0` — a zero gets
-   averaged into a benchmark, a `None` forces the question.
-2. **The explicit runners are the reference.** An engine or a compiled path is
+1. **Evidence** stays where the harness put it: `results/eval/<run>/`,
+   `results/llm_bakeoff/`, `results/tts_bakeoff/`, `results/streaming_eval/`,
+   `results/gpu_validation*/`, `results/live/turns.jsonl`,
+   `results/bench_manifest.json`.
+2. **Commit the JSON and Markdown, never the audio or the weights.**
+   `.gitignore` already excludes WAVs, MP3s and checkpoints; do not force-add
+   them.
+3. **Append to `docs/EXPERIMENTS.md`** using the result-entry template at the
+   end of that file. Include the conditions (GPU, dtype, split, seed, limit,
+   normalization level) and the path to the evidence. Leave a field blank
+   rather than filling it from a different run.
+4. **Commit per logical result**, conventional-commit style, body explaining
+   what was decided and why. End every commit message with:
+   `Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>`
+5. **Write `results/BLOCKED.md`** for anything you could not do, with the
+   reason and what a person would need to provide.
+
+## Hard rules
+
+Each of these exists because violating it cost real time on this project.
+
+1. **Measure before attributing.** A 4062 ms latency segment was called a TTS
+   problem; it was mostly the LLM still generating. If you cannot name the
+   file a claim comes from, do not make the claim.
+2. **`None`, never `0.0`,** for anything unmeasured. A zero is averaged into a
+   benchmark; a `None` forces the question.
+3. **The explicit runners are the reference.** An engine or a compiled path is
    a faster way to serve the same model and must match them token-for-token
-   (fp16/fp32) or within a stated WER (int8) before it is used. See the
-   correctness policy in the README.
-3. **Commit the evidence, not the summary.** Every evaluation writes
-   `run_config.json` with git SHA, package versions and the literal sampled
-   indices. Quote numbers that have a file behind them.
-4. **Record a missed target as missed.** v2 hit 23.83% WER against a
-   pre-registered 22.0%. The miss is documented with its cause (multi-GPU
-   DataParallel halved the optimizer steps), not retroactively softened.
-5. **`git fetch && git reset --hard origin/main`, not `git pull`.** Local
-   installs and result files make `pull` refuse, and with `-q` that refusal is
-   silent. This cost two debugging rounds.
-6. **Restart the interpreter after pulling.** Python caches modules; a pulled
-   fix that "did not work" was usually a stale import.
+   (fp16/fp32) or within a stated WER (int8) before it is used anywhere.
+4. **Do not move a target after seeing the result.** v2 missed its
+   pre-registered 22.0% WER and that is recorded as a miss, with its cause
+   (multi-GPU DataParallel halved the optimizer steps). Do the same.
+5. **One variable per experiment.** If you must change two, say so explicitly
+   in the ledger and do not attribute the result to either.
+6. **Never train on, or tune against, the test split.** Model selection uses
+   the validation split; `--seed`/`--limit` must match between compared runs.
+7. **`git fetch && git reset --hard origin/main`, not `git pull`** — local
+   installs and result files make `pull` refuse, and `-q` hides the refusal.
+8. **Restart the interpreter after changing modules.** Python caches imports;
+   a fix that "did not work" was usually a stale one.
+9. **Do not delete or rewrite existing evidence.** Superseded results get a
+   note saying why, not a deletion.
 
-## Known state
+## Requires a human — stop and write it down
 
-- **Shipped ASR:** turbo + LoRA v2 — 23.83% WER / 8.43% CER, 694 ms p50, RTF
-  0.066 on 300 seeded FLEURS-hi test clips (T4). Full history, including a
-  225-token bug that inflated an earlier number, in `docs/EXPERIMENTS.md`.
-- **Not doing:** a v3 ASR re-run. Decided and recorded; the remaining value is
-  elsewhere.
-- **Empty:** `data/hard_set/` — the ledger requires per-category numbers for a
-  result entry and none can be produced until clips are curated. Needs human
-  judgement on clip selection.
-- **Unmeasured:** everything in the table above.
+- **Curating `data/hard_set/`.** Clip selection and per-category labelling are
+  judgement calls. Do not synthesise a hard set.
+- **Final LLM and TTS choice**, insofar as it depends on hearing Hindi
+  fluency and voice quality. Narrow it to a ranked shortlist with evidence.
+- **Publishing anything** (Hub uploads, pushing to a new remote, making a repo
+  public).
+- **Live-audio tasks if no audio device exists.** Do the file-replay version
+  and mark the gap.
+- **Anything destructive**: rewriting git history, deleting `results/`,
+  force-pushing.
+
+## Definition of done
+
+- Phase 1 concluded: the decode guards are either confirmed harmless or fixed,
+  with numbers in the ledger.
+- Every row of the "open" table in Current State has either a recorded
+  measurement and a decision applied from the rules above, or an entry in
+  `results/BLOCKED.md` explaining why not.
+- `docs/EXPERIMENTS.md` has an entry per result, with evidence paths.
+- `pytest` still passes, `ruff check .` is clean, and everything is committed
+  and pushed.
+- A short `results/SESSION.md` summarising what was decided, what changed, and
+  what the next session should pick up — written for a reader who was not
+  here.

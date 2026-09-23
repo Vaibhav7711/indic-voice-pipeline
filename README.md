@@ -54,10 +54,12 @@ writes `results/gpu_validation/report.json` with a pass/fail per check.
 
 Hosted notebooks cannot reach a local URL, open a microphone or drive a sound
 device, so the live agent and the interactive demo were never measurable
-there. [`docs/RTX_WORK.md`](docs/RTX_WORK.md) is the self-contained setup and
-work plan for a local CUDA box: environment, audio devices, fetching the
-shipped adapter, the VRAM budget that decides which LLMs are candidates, what
-to verify before measuring, and which command settles each open question.
+there. [`docs/RTX_WORK.md`](docs/RTX_WORK.md) is a brief written to be handed
+to an autonomous agent on a local CUDA box: current state with evidence
+paths, environment gates, the 6 GB VRAM budget that constrains what can be
+deployed, the benchmark plan, **decision rules fixed before the results are
+seen**, the recording protocol, and an explicit list of what requires a
+human instead.
 
 ## Streaming and voice-agent behaviour
 
