@@ -50,6 +50,15 @@ writes `results/gpu_validation/report.json` with a pass/fail per check.
 > falls back through `trust_remote_code` and the Hub's parquet revision, and
 > raises an actionable error if all three fail.
 
+## Running on a local GPU
+
+Hosted notebooks cannot reach a local URL, open a microphone or drive a sound
+device, so the live agent and the interactive demo were never measurable
+there. [`docs/RTX_WORK.md`](docs/RTX_WORK.md) is the self-contained setup and
+work plan for a local CUDA box: environment, audio devices, fetching the
+shipped adapter, the VRAM budget that decides which LLMs are candidates, what
+to verify before measuring, and which command settles each open question.
+
 ## Streaming and voice-agent behaviour
 
 Streaming ASR (`asr/streaming/`) and agent output (`agent/`, `tts/streaming.py`)
