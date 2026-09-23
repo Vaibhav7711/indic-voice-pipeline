@@ -50,16 +50,18 @@ writes `results/gpu_validation/report.json` with a pass/fail per check.
 > falls back through `trust_remote_code` and the Hub's parquet revision, and
 > raises an actionable error if all three fail.
 
-## Running on a local GPU
+## Finishing the remaining work
 
-Hosted notebooks cannot reach a local URL, open a microphone or drive a sound
-device, so the live agent and the interactive demo were never measurable
-there. [`docs/RTX_WORK.md`](docs/RTX_WORK.md) is a brief written to be handed
-to an autonomous agent on a local CUDA box: current state with evidence
-paths, environment gates, the 6 GB VRAM budget that constrains what can be
-deployed, the benchmark plan, **decision rules fixed before the results are
-seen**, the recording protocol, and an explicit list of what requires a
-human instead.
+[`docs/AGENT_BRIEF.md`](docs/AGENT_BRIEF.md) is written to be handed to an
+autonomous agent: current state with evidence paths, what a Colab T4 can and
+cannot measure, environment gates, the VRAM budget, the benchmark plan,
+**decision rules fixed before the results are seen**, the recording protocol,
+and an explicit list of what requires a human instead.
+
+`scripts/bench_all.py` runs every batch benchmark unattended and is
+resumable, so a hosted session that dies mid-run continues rather than
+restarting; `--mirror` copies evidence to a mounted Drive as each step
+finishes.
 
 ## Streaming and voice-agent behaviour
 
