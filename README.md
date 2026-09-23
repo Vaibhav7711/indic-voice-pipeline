@@ -61,7 +61,8 @@ and an explicit list of what requires a human instead.
 `scripts/bench_all.py` runs every batch benchmark unattended and is
 resumable, so a hosted session that dies mid-run continues rather than
 restarting; `--mirror` copies evidence to a mounted Drive as each step
-finishes.
+finishes. [`notebooks/finish_colab.ipynb`](notebooks/finish_colab.ipynb) is
+that plan as a runnable notebook — open it in Colab on a T4 and work down.
 
 ## Streaming and voice-agent behaviour
 
@@ -150,6 +151,7 @@ tests/
 
 notebooks/
     eval_colab.ipynb  End-to-end GPU evaluation workflow for Colab
+    finish_colab.ipynb  The remaining measurements, phase by phase, on a T4
     gpu_validation_kaggle.ipynb  Stage 3-5 validation sweep on Kaggle GPU
 
 agent/
