@@ -41,7 +41,8 @@ class WhisperDecoder:
             state, ms = decoder.decode_one(state)
     """
 
-    def __init__(self, model: WhisperForConditionalGeneration, device: torch.device):
+    def __init__(self, model: WhisperForConditionalGeneration, device: torch.device,
+                 *, no_speech_token_id: int | None = None):
         self.model = model
         self.device = device
         self.gen_config = model.generation_config
@@ -54,20 +55,25 @@ class WhisperDecoder:
             getattr(self.gen_config, "begin_suppress_tokens", None),
         )
         # <|nospeech|>: Whisper's own estimate that the window contains no
-        # speech. Read at the first decoding position, exactly where
-        # generate() reads it. Without this the greedy loop transcribes
-        # silence or noise into a hallucinated phrase and then repeats it.
-        self.no_speech_token_id = self._resolve_no_speech_token()
+        # speech. Its id is NOT stable across checkpoints — on whisper-small
+        # and whisper-medium 50363 is <|notimestamps|>, and the token is
+        # spelled <|nocaptions|> there — so it must be resolved from the
+        # model's own vocabulary and never guessed. ASRRunner resolves it
+        # from the processor's tokenizer and passes it in; when it cannot be
+        # resolved the no-speech check is disabled rather than run against
+        # an arbitrary token's probability.
+        self.no_speech_token_id = (
+            no_speech_token_id if no_speech_token_id is not None
+            else self._resolve_no_speech_token()
+        )
 
     def _resolve_no_speech_token(self) -> int | None:
+        """Only from the generation config. Returns None if absent."""
         for attr in ("no_speech_token_id", "no_speech_token"):
             value = getattr(self.gen_config, attr, None)
             if isinstance(value, int):
                 return value
-        # Not in the generation config on every checkpoint; the tokenizer
-        # knows it, but the decoder is not given one, so fall back to the
-        # id that has been stable across Whisper releases.
-        return 50363
+        return None
 
     def _ids_tensor(self, ids) -> torch.Tensor | None:
         ids = [int(i) for i in (ids or [])]
@@ -228,9 +234,16 @@ class WhisperDecoder:
             )
 
         last_logits = outputs.logits[:, -1, :]
+        # Whisper's no-speech probability belongs to the <|sot|> position —
+        # the distribution after the model has seen only the start token,
+        # which is where <|nospeech|> is a candidate at all. Because the whole
+        # prompt is prefilled in one forward, that is logits[:, 0, :]; reading
+        # the LAST position (after <|notimestamps|>) samples a distribution
+        # in which the token can never appear, so the probability was
+        # meaningless.
         no_speech_prob = None
         if self.no_speech_token_id is not None:
-            probs = torch.softmax(last_logits.float(), dim=-1)
+            probs = torch.softmax(outputs.logits[:, 0, :].float(), dim=-1)
             no_speech_prob = float(probs[0, self.no_speech_token_id].item())
 
         next_token = self._pick(last_logits, at_begin=True)

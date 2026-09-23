@@ -21,6 +21,37 @@ from asr.explicit.mel import extract_mel, load_audio, load_audio_from_array
 from asr.explicit.timing import peak_allocated, peak_reserved, reset_peak
 
 
+def resolve_no_speech_token(processor, model) -> int | None:
+    """The model's own ``<|nospeech|>`` id, or None if it has none.
+
+    Checkpoints disagree on both the spelling and the id: large-v3 family
+    uses ``<|nospeech|>`` at 50363, while small/medium use ``<|nocaptions|>``
+    and put ``<|notimestamps|>`` at 50363. Asking the tokenizer for a token
+    it does not have returns the unk/eos id, which would silently read the
+    wrong distribution, so a resolved id is only accepted when it round-trips
+    back to the name asked for.
+    """
+    generation_config = getattr(model, "generation_config", None)
+    for attr in ("no_speech_token_id", "no_speech_token"):
+        value = getattr(generation_config, attr, None)
+        if isinstance(value, int):
+            return value
+
+    tokenizer = getattr(processor, "tokenizer", None)
+    convert = getattr(tokenizer, "convert_tokens_to_ids", None)
+    back = getattr(tokenizer, "convert_ids_to_tokens", None)
+    if not callable(convert) or not callable(back):
+        return None
+    for name in ("<|nospeech|>", "<|nocaptions|>"):
+        try:
+            token_id = convert(name)
+            if isinstance(token_id, int) and back(token_id) == name:
+                return token_id
+        except Exception:  # noqa: BLE001 - an unusable tokenizer disables the check
+            continue
+    return None
+
+
 def compression_ratio(text: str) -> float:
     """``len(text) / len(gzip(text))``. Whisper's own repetition detector:
     natural language compresses ~1.5-2x, a repeated phrase far more."""
@@ -107,12 +138,34 @@ class LongFormMetrics:
     audio_load_ms: float
     chunk_asr_ms: float
     total_ms: float
+    # Decode-guard state aggregated over the windows. Without these a
+    # long-form result carries no guard information at all, so the streaming
+    # session's degenerate-final filtering was inert on every utterance long
+    # enough to be chunked — exactly the ones most likely to loop.
+    no_speech: bool = False
+    stopped_on_repetition: bool = False
+    hit_token_budget: bool = False
+    compression_ratio: float = 0.0
 
     @property
     def real_time_factor(self) -> float:
         if self.audio_duration_seconds <= 0:
             return 0.0
         return (self.total_ms / 1000.0) / self.audio_duration_seconds
+
+    def as_dict(self) -> dict:
+        return {
+            "audio_duration_seconds": self.audio_duration_seconds,
+            "chunk_count": self.chunk_count,
+            "audio_load_ms": self.audio_load_ms,
+            "chunk_asr_ms": self.chunk_asr_ms,
+            "total_ms": self.total_ms,
+            "real_time_factor": self.real_time_factor,
+            "no_speech": self.no_speech,
+            "stopped_on_repetition": self.stopped_on_repetition,
+            "hit_token_budget": self.hit_token_budget,
+            "compression_ratio": self.compression_ratio,
+        }
 
 
 @dataclass
@@ -173,7 +226,9 @@ class ASRRunner:
         #: Flag (do not discard) transcripts that compress this well.
         self.compression_ratio_threshold = compression_ratio_threshold
         self.encoder = WhisperEncoder(model, device)
-        self.decoder = WhisperDecoder(model, device)
+        self.decoder = WhisperDecoder(
+            model, device, no_speech_token_id=resolve_no_speech_token(processor, model),
+        )
         self.eos_token_id = model.generation_config.eos_token_id
 
     def transcribe_file(
@@ -285,6 +340,12 @@ class ASRRunner:
                 audio_load_ms=load_ms,
                 chunk_asr_ms=sum(result.metrics.total_ms for result in results),
                 total_ms=total_ms,
+                # A guard that fired on any window describes the whole result:
+                # one looped or truncated window poisons the stitched text.
+                no_speech=all(r.metrics.no_speech for r in results) if results else False,
+                stopped_on_repetition=any(r.metrics.stopped_on_repetition for r in results),
+                hit_token_budget=any(r.metrics.hit_token_budget for r in results),
+                compression_ratio=compression_ratio(text),
             ),
         )
 

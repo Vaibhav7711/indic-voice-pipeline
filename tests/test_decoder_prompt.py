@@ -197,9 +197,11 @@ NO_SPEECH = 50363
 
 
 class _ScriptedModel(_BudgetModel):
-    """Emits a token script, and a settable P(<|nospeech|>) at prefill."""
+    """Emits a token script, and a settable P(<|nospeech|>) at the <|sot|>
+    position — position 0 of the prefill forward, which is where Whisper's
+    no-speech probability lives."""
 
-    def __init__(self, script, no_speech_logit=-20.0, positions=448):
+    def __init__(self, script, no_speech_logit=-60.0, positions=448):
         super().__init__(positions)
         self.script = list(script)
         self.no_speech_logit = no_speech_logit
@@ -212,18 +214,24 @@ class _ScriptedModel(_BudgetModel):
         self.steps += 1
         logits[0, -1, token] = 10.0
         if prefill:
-            logits[0, -1, NO_SPEECH] = self.no_speech_logit
+            logits[0, 0, NO_SPEECH] = self.no_speech_logit
         return SimpleNamespace(logits=logits, past_key_values=None)
 
 
 def _runner(model, **kw):
     from asr.explicit.runner import ASRRunner
 
+    # The tokenizer must answer the conversion calls, or the no-speech token
+    # cannot be resolved and the check is (correctly) disabled.
+    tokenizer = SimpleNamespace(
+        decode=lambda ids, skip_special_tokens=True: " ".join("क" for _ in ids),
+        convert_tokens_to_ids=lambda name: NO_SPEECH if name == "<|nospeech|>" else 50257,
+        convert_ids_to_tokens=lambda i: "<|nospeech|>" if i == NO_SPEECH else "<|endoftext|>",
+    )
     processor = SimpleNamespace(
         feature_extractor=lambda *a, **k: SimpleNamespace(
             input_features=torch.zeros(1, 80, 3000)),
-        tokenizer=SimpleNamespace(
-            decode=lambda ids, skip_special_tokens=True: " ".join("क" for _ in ids)),
+        tokenizer=tokenizer,
     )
     return ASRRunner(model, processor, torch.device("cpu"), torch.float32, **kw)
 
@@ -250,7 +258,7 @@ def test_no_speech_check_can_be_disabled():
 
 
 def test_speech_window_is_transcribed_and_probability_recorded():
-    model = _ScriptedModel([1234, 1235, 0], no_speech_logit=-20.0)
+    model = _ScriptedModel([1234, 1235, 0], no_speech_logit=-60.0)
     model.generation_config.eos_token_id = 0
     result = _transcribe(_runner(model))
     assert result.metrics.no_speech is False
@@ -299,3 +307,109 @@ def test_compression_ratio_separates_repetition_from_language():
     assert compression_ratio(repeated) > 2.4
     assert compression_ratio(natural) < 2.4
     assert compression_ratio("") == 0.0
+
+
+# ---------------------------------------------------------------------------
+# The no-speech token id is checkpoint-specific and must never be guessed
+# ---------------------------------------------------------------------------
+
+
+class _Tokenizer:
+    """Mimics a real Whisper tokenizer: an unknown special token resolves to
+    the unk/eos id rather than failing, which is how a guessed id silently
+    reads the wrong distribution."""
+
+    def __init__(self, table):
+        self.table = dict(table)
+        self.unk = 50257
+
+    def convert_tokens_to_ids(self, name):
+        return self.table.get(name, self.unk)
+
+    def convert_ids_to_tokens(self, token_id):
+        for name, value in self.table.items():
+            if value == token_id:
+                return name
+        return "<|endoftext|>"
+
+
+def _processor(table):
+    return SimpleNamespace(tokenizer=_Tokenizer(table))
+
+
+def _model(**generation):
+    return SimpleNamespace(generation_config=SimpleNamespace(**generation))
+
+
+class TestNoSpeechTokenResolution:
+    def test_large_v3_family_uses_nospeech(self):
+        from asr.explicit.runner import resolve_no_speech_token
+
+        proc = _processor({"<|nospeech|>": 50363, "<|notimestamps|>": 50364})
+        assert resolve_no_speech_token(proc, _model()) == 50363
+
+    def test_small_and_medium_use_nocaptions_and_50363_is_notimestamps(self):
+        """The bug: 50363 was hardcoded, but on these checkpoints it is
+        <|notimestamps|> — the guard was reading an unrelated token."""
+        from asr.explicit.runner import resolve_no_speech_token
+
+        proc = _processor({"<|nocaptions|>": 50362, "<|notimestamps|>": 50363})
+        resolved = resolve_no_speech_token(proc, _model())
+        assert resolved == 50362
+        assert resolved != 50363
+
+    def test_a_tokenizer_without_the_token_disables_the_check(self):
+        """convert_tokens_to_ids returns the unk id for an absent token; that
+        must not be accepted, because it is a real token id."""
+        from asr.explicit.runner import resolve_no_speech_token
+
+        proc = _processor({"<|notimestamps|>": 50363})
+        assert resolve_no_speech_token(proc, _model()) is None
+
+    def test_generation_config_wins_when_it_has_the_id(self):
+        from asr.explicit.runner import resolve_no_speech_token
+
+        proc = _processor({"<|nospeech|>": 50363})
+        assert resolve_no_speech_token(proc, _model(no_speech_token_id=99)) == 99
+
+    def test_no_tokenizer_disables_the_check_rather_than_guessing(self):
+        from asr.explicit.runner import resolve_no_speech_token
+
+        assert resolve_no_speech_token(SimpleNamespace(), _model()) is None
+
+    def test_decoder_without_a_resolved_id_reports_no_probability(self):
+        dec = _decoder()
+        dec.gen_config.no_speech_token_id = None
+        from asr.explicit.decoder import WhisperDecoder
+
+        fresh = WhisperDecoder(dec.model, torch.device("cpu"))
+        assert fresh.no_speech_token_id is None
+
+
+def test_no_speech_probability_is_read_at_the_sot_position():
+    """Whisper's no-speech probability belongs to the distribution after
+    <|sot|> alone. Reading the last prompt position (after <|notimestamps|>)
+    samples a distribution where the token cannot appear."""
+    from asr.explicit.decoder import WhisperDecoder
+
+    NO_SPEECH = 50363
+
+    class _PositionalModel:
+        """Puts <|nospeech|> mass at position 0 only, and a decoy elsewhere."""
+
+        def __init__(self):
+            self.generation_config = _gen_config()
+            self.config = SimpleNamespace(max_target_positions=448)
+
+        def __call__(self, *, encoder_outputs, decoder_input_ids, **kw):
+            n = decoder_input_ids.shape[1]
+            logits = torch.full((1, n, VOCAB), -30.0)
+            logits[0, 0, NO_SPEECH] = 20.0          # SOT position: no speech
+            if n > 1:
+                logits[0, -1, 1234] = 20.0          # last position: a word
+            return SimpleNamespace(logits=logits, past_key_values=None)
+
+    dec = WhisperDecoder(_PositionalModel(), torch.device("cpu"),
+                         no_speech_token_id=NO_SPEECH)
+    state, _ = dec.prefill(None, language="hi")
+    assert state.no_speech_prob > 0.9, "must read position 0, not the last"
