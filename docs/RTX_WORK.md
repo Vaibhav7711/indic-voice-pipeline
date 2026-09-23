@@ -1,7 +1,7 @@
 # Agent brief: benchmarking this project on the local RTX box
 
 You are an autonomous coding agent working in this repository on a machine
-with an RTX 4060 (**6 GB VRAM**), Ubuntu under WSL2 with a native Ubuntu dual
+with an RTX 4060 (**8 GB VRAM**), Ubuntu under WSL2 with a native Ubuntu dual
 boot available. There is **no human in the loop**. Work through the plan
 below, record every result as a file, commit the evidence, and stop with a
 written note when you hit something that genuinely needs a person.
@@ -59,7 +59,7 @@ python -c "import torch; print('bf16 native:', torch.cuda.is_bf16_supported())"
 | --- | --- | --- |
 | `torch.cuda.is_available()` | True | stop; record blocked |
 | `bf16 native` | True on Ada | note it; `pick_dtype` adapts either way |
-| free VRAM at idle | ≥ 5 GB | a desktop session may be holding VRAM; note the baseline and subtract it from every budget below |
+| free VRAM at idle | ≥ 7 GB | a desktop session may be holding VRAM; note the baseline and subtract it from every budget below |
 | `pytest` | 550 passed, 8 skipped | fix before benchmarking; a failing suite invalidates everything after it |
 
 ### The adapter
@@ -94,23 +94,36 @@ python -c "import sounddevice as sd; print(sd.query_devices())"
   reason into `results/BLOCKED.md`. Do not report a file replay as a live
   turn.
 
-## The 6 GB budget — this constrains what you may deploy
+## The 8 GB budget — this constrains what you may deploy
 
 `llm_bakeoff` loads one model at a time, so it can benchmark models the agent
 cannot run. The agent needs Whisper **and** the LLM resident together, because
 the streaming session needs Whisper for the next utterance's partials;
 sequential offload would add ~0.5–1 s per turn and break partials.
 
-| Agent stack | Weights | On 6 GB |
-| --- | ---: | --- |
-| turbo + Qwen3-0.6B + MMS | 2.7 GB | fits; 0.6B is the known weak link |
-| turbo + **Qwen3-1.7B 4-bit** + MMS | 2.4 GB | **the target if the bake-off justifies it** |
-| turbo + Qwen3-1.7B fp16 + MMS | 4.7 GB | too tight with KV cache and activations |
-| CT2-int8 turbo + 1.7B 4-bit + MMS | 1.7 GB | most headroom; requires `ct2_check` to pass |
-| anything + Qwen3-4B | 7.5 GB+ | out of reach |
+Assume ~7.5 GiB usable (a desktop session holds some) and ~0.4 GiB of KV
+cache and activations on top of weights — measured peak was 2.9 GiB for a
+2.7 GiB-weight stack on a T4, so the overhead is small for this workload.
 
-`llm.loader.estimate_vram_gib(param_millions, quantization)` gives these
-numbers; recompute rather than trusting the table if a model changes.
+| Agent stack | Weights | Peak | On 8 GB |
+| --- | ---: | ---: | --- |
+| turbo + Qwen3-0.6B fp16 + MMS | 2.69 | 3.1 | fits; 0.6B is the known weak link |
+| turbo + **Qwen3-1.7B fp16** + MMS | 4.74 | 5.1 | **fits — the default target, no quantization needed** |
+| turbo + Qwen3-1.7B 4-bit + MMS | 2.44 | 2.8 | fits; only worth it for headroom, and it costs quality |
+| turbo + **Qwen3-4B 4-bit** + MMS | 3.62 | 4.0 | fits — the largest model that can run here at all |
+| turbo + Qwen3-4B fp16 + MMS | 9.02 | 9.4 | **does not fit** |
+| CT2-int8 turbo + Qwen3-4B 4-bit + MMS | 2.92 | 3.3 | most headroom; requires `ct2_check` to pass |
+
+Two consequences to carry into the bake-off:
+
+1. **Qwen3-1.7B runs unquantized here.** Prefer fp16 — it is the honest
+   configuration and avoids dequantization work per token.
+2. **Qwen3-4B is reachable only at 4-bit.** That makes it worth measuring:
+   a 4B model with quantization damage may still beat a 1.7B without it, or
+   may not. Both outcomes are useful and neither is obvious.
+
+`llm.loader.estimate_vram_gib(param_millions, quantization)` produced this
+table; recompute rather than trusting it if a candidate changes.
 
 ## Plan
 
@@ -141,9 +154,15 @@ each `metrics.json`.
 
 ```bash
 python scripts/bench_all.py --adapter "$ADAPTER" \
-    --llm-models Qwen/Qwen3-0.6B,Qwen/Qwen3-1.7B,Qwen/Qwen3-1.7B:4bit \
+    --llm-models Qwen/Qwen3-0.6B,Qwen/Qwen3-1.7B,Qwen/Qwen3-4B:4bit \
     --skip guards_on,guards_off,compare_guards
 ```
+
+Those three are the ones that can actually be deployed here: the incumbent,
+the largest unquantized model that fits, and the largest model of any kind
+that fits. Add `Qwen/Qwen3-1.7B:4bit` if you want the quantization cost
+isolated on a model you can also run unquantized — that is the clean way to
+read how much 4-bit damages the 4B result.
 
 ~2 hours unattended. It writes a log per step and
 `results/bench_manifest.json`. A failing step does not stop the rest; check
@@ -174,7 +193,7 @@ number cannot be reinterpreted into a success. Apply them literally.
 | Incremental finals (`early-incr`) | `wer_vs_offline` rises < 1.0 pp versus `early` **and** mean `endpoint_to_final_ms` drops | keep off, record the measured cost |
 | Semantic endpointing (`early-sem`) | `clips_split` drops from 16/100 to single digits at < 150 ms mean added `endpoint_to_final_ms` | keep off |
 | LLM | highest `devanagari_ratio_mean` with **zero** `think_leaks`, `first_sentence_ms_p50` < 800 ms, and a stack that fits the 6 GB table | keep Qwen3-0.6B and record why the alternatives failed |
-| 4-bit quantization | 4-bit's Hindi quality is not visibly worse in `outputs.jsonl` **and** it is the only way the chosen model fits | use fp16 if it fits, else the smaller model |
+| 4-bit quantization | it is the only way the chosen model fits (true for Qwen3-4B here, false for 1.7B) **and** its Hindi in `outputs.jsonl` is not visibly worse than the fp16 model it would replace | prefer fp16; Qwen3-1.7B fits unquantized on 8 GB |
 | TTS backend | lower `first_chunk_ms_p50` with acceptable audio in the saved WAVs | keep edge-tts and record the local model's cost |
 | CTranslate2 engine | `ct2_matches_explicit` passes (token-identical at fp16, ≤ 5% WER apart at int8) **and** speedup > 1.3× | keep the explicit runner |
 | Compiled decode | `llm_compiled_matches_eager` shows tokens match **and** speedup > 1.1× | keep it off; record the Ada number next to the T4's 0.9× |

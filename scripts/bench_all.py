@@ -139,7 +139,10 @@ def main(argv: list[str] | None = None) -> int:
                         help="Clips for the ASR evaluations")
     parser.add_argument("--streaming-limit", type=int, default=100)
     parser.add_argument("--llm-models",
-                        default="Qwen/Qwen3-0.6B,Qwen/Qwen3-1.7B,Qwen/Qwen3-4B")
+                        default="Qwen/Qwen3-0.6B,Qwen/Qwen3-1.7B,Qwen/Qwen3-4B",
+                        help="Comma-separated; a 'name:4bit' spec loads that "
+                             "candidate quantized. On an 8 GB card Qwen3-4B "
+                             "only fits as ':4bit' alongside Whisper.")
     parser.add_argument("--tts-backends", default="edge,mms")
     parser.add_argument("--ct2-dir", default="models/ct2/turbo-hindi-v2")
     parser.add_argument("--only", default=None,
