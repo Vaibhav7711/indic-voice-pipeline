@@ -162,13 +162,16 @@ def _keep(example, max_seconds: float) -> bool:
 
 
 def load_primary(config: TrainingConfig):
-    from datasets import load_dataset
+    from benchmarks.fleurs import load_fleurs
 
     if config.dataset == "fleurs":
-        ds = load_dataset("google/fleurs", f"{config.language}_in")
-        train_ds, eval_ds = ds["train"], ds["validation"]
+        fleurs_config = f"{config.language}_in"
+        train_ds = load_fleurs(fleurs_config, "train")
+        eval_ds = load_fleurs(fleurs_config, "validation")
         text_col = "transcription"
     elif config.dataset == "common_voice":
+        from datasets import load_dataset
+
         ds = load_dataset("mozilla-foundation/common_voice_17_0", config.language)
         train_ds, eval_ds = ds["train"], ds["validation"]
         text_col = "sentence"

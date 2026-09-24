@@ -56,6 +56,35 @@ def test_defaults_without_preset_are_the_dataclass_defaults():
     assert c == lora.TrainingConfig()
 
 
+def test_fleurs_training_load_uses_compatibility_shim(monkeypatch):
+    calls = []
+
+    class Split:
+        column_names = ["audio", "transcription", "speaker_id"]
+
+        def __init__(self, rows):
+            self.rows = rows
+            self.removed = None
+
+        def map(self, function, remove_columns):
+            self.removed = remove_columns
+            return [function(row) for row in self.rows]
+
+    train = Split([{"audio": "train.wav", "transcription": "नमस्ते", "speaker_id": 1}])
+    validation = Split([{"audio": "valid.wav", "transcription": "धन्यवाद", "speaker_id": 2}])
+
+    def fake_load_fleurs(config, split):
+        calls.append((config, split))
+        return {"train": train, "validation": validation}[split]
+
+    monkeypatch.setattr("benchmarks.fleurs.load_fleurs", fake_load_fleurs)
+    loaded_train, loaded_eval = lora.load_primary(lora.TrainingConfig())
+
+    assert calls == [("hi_in", "train"), ("hi_in", "validation")]
+    assert loaded_train == [{"audio": "train.wav", "sentence": "नमस्ते"}]
+    assert loaded_eval == [{"audio": "valid.wav", "sentence": "धन्यवाद"}]
+
+
 def test_hub_checkpoint_steps_only_counts_complete_checkpoints():
     files = [
         "checkpoint-200/adapter_model.safetensors", "checkpoint-200/trainer_state.json",
