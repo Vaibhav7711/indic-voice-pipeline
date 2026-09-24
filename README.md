@@ -416,8 +416,9 @@ unpublished adapter artifact and are not reproducible from this checkout.
 
 ### ASR quality on the same 300 clips
 
-The shipped adapter is **v2**: `large-v3-turbo` + Hindi LoRA. v1
-(`whisper-medium`) is kept for comparison. Full history, including a
+The measured candidate is **v2**: `large-v3-turbo` + Hindi LoRA; its weights
+are not published in this checkout. v1 (`whisper-medium`) is kept for
+comparison. Full history, including a
 token-budget bug that inflated earlier numbers, in `docs/EXPERIMENTS.md`.
 
 | Model | WER | CER | p50 latency | RTF |
