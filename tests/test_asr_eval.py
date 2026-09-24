@@ -300,3 +300,108 @@ class TestHardSet:
         # The example uses placeholder local paths that are intentionally
         # absent; every other rule must still pass.
         assert all("audio file not found" in p for p in problems)
+
+
+class TestAbsentIsNotZero:
+    """The project's own rule — None never 0.0 — applied to the per-example
+    flags. A re-score of predictions written before a flag existed used to
+    report a confident 0, indistinguishable from 'measured, none fired', on
+    exactly the runs quoted as headline results."""
+
+    def _rows(self, **extra):
+        base = [{"id": f"c{i}", "reference": "एक दो", "hypothesis": "एक दो",
+                 "latency": {"decoder_steps": 10, "total_ms": 100.0,
+                             "real_time_factor": 0.1}} for i in range(3)]
+        for row in base:
+            row.update(extra)
+        return base
+
+    def test_flag_absent_reports_none_not_zero(self):
+        from benchmarks.asr_eval import score_predictions
+
+        metrics, _ = score_predictions(self._rows())
+        cut = metrics["truncated_by_token_budget"]
+        assert cut["recorded"] is False
+        assert cut["count"] is None
+        assert "absent, not zero" in cut["note"]
+        for name in ("no_speech", "repetition"):
+            guard = metrics["decode_guards_fired"][name]
+            assert guard["recorded"] is False and guard["count"] is None
+
+    def test_flag_present_and_false_reports_zero(self):
+        from benchmarks.asr_eval import score_predictions
+
+        metrics, _ = score_predictions(self._rows(hit_token_budget=False, no_speech=False))
+        cut = metrics["truncated_by_token_budget"]
+        assert cut["recorded"] is True and cut["count"] == 0
+        assert metrics["decode_guards_fired"]["no_speech"]["count"] == 0
+
+    def test_flag_present_and_true_is_counted_with_ids(self):
+        from benchmarks.asr_eval import score_predictions
+
+        rows = self._rows(hit_token_budget=False)
+        rows[1]["hit_token_budget"] = True
+        metrics, _ = score_predictions(rows)
+        cut = metrics["truncated_by_token_budget"]
+        assert cut["recorded"] is True and cut["count"] == 1 and cut["ids"] == ["c1"]
+
+    def test_truncation_is_inferred_from_the_recorded_budget(self):
+        """Old predictions carry no flag, but decoder_steps against the run's
+        max_new_tokens still identifies a cut-off hypothesis."""
+        from benchmarks.asr_eval import score_predictions
+
+        rows = self._rows()
+        rows[0]["latency"]["decoder_steps"] = 225
+        rows[2]["latency"]["decoder_steps"] = 225
+        metrics, _ = score_predictions(rows, token_budget=225)
+        cut = metrics["truncated_by_token_budget"]
+        assert cut["recorded"] is False, "still not a recorded measurement"
+        assert cut["count"] is None
+        assert cut["inferred_count"] == 2
+        assert cut["ids"] == ["c0", "c2"]
+        assert cut["unknown"] == 0
+
+    def test_no_budget_anywhere_means_unknown_not_false(self):
+        from benchmarks.asr_eval import score_predictions
+
+        metrics, _ = score_predictions([{"id": "c0", "reference": "एक",
+                                         "hypothesis": "एक"}])
+        cut = metrics["truncated_by_token_budget"]
+        assert cut["recorded"] is False and cut["count"] is None
+        assert "inferred_count" not in cut
+
+    def test_read_run_budget_from_a_sibling_config(self, tmp_path):
+        import json as _json
+
+        from benchmarks.asr_eval import read_run_budget
+
+        predictions = tmp_path / "predictions.jsonl"
+        predictions.write_text("")
+        assert read_run_budget(predictions) is None
+        (tmp_path / "run_config.json").write_text(_json.dumps({"max_new_tokens": 225}))
+        assert read_run_budget(predictions) == 225
+        (tmp_path / "run_config.json").write_text(_json.dumps({"max_new_tokens": None}))
+        assert read_run_budget(predictions) is None
+        (tmp_path / "run_config.json").write_text("{not json")
+        assert read_run_budget(predictions) is None
+
+
+def test_shipped_v1_predictions_are_detectably_truncated():
+    """Regression guard on a real committed artifact: the v1 headline run was
+    scored at max_new_tokens=225, and 7 of its 300 hypotheses ran to that
+    budget. Its 25.82% WER is therefore an overstatement, and v2's 23.83% —
+    measured after the fix — is not directly comparable to it."""
+    import pathlib
+
+    from benchmarks.asr_eval import read_jsonl, read_run_budget, score_predictions
+
+    path = pathlib.Path("results/eval/medium-lora-test-300-seed0/predictions.jsonl")
+    if not path.is_file():
+        pytest.skip("shipped predictions not present")
+    budget = read_run_budget(path)
+    assert budget == 225
+    metrics, _ = score_predictions(read_jsonl(path), token_budget=budget)
+    cut = metrics["truncated_by_token_budget"]
+    assert cut["recorded"] is False
+    assert cut["inferred_count"] == 7
+    assert "fleurs-hi_in-test-85" in cut["ids"]

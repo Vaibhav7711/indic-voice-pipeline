@@ -185,8 +185,22 @@ def _corpus_rates(rows: list[dict], level, unit: str) -> dict:
 
 
 def _latency_summary(rows: list[dict]) -> dict:
-    totals = [r["latency"]["total_ms"] for r in rows if r.get("latency")]
-    rtfs = [r["latency"]["real_time_factor"] for r in rows if r.get("latency")]
+    """Aggregate per-example latency, skipping what was never measured.
+
+    Missing keys are tolerated rather than fatal (predictions written by an
+    older version lack fields added later), and a ``None`` rate — an
+    undefined RTF from a zero-duration clip — is excluded from the mean
+    instead of contributing a flattering zero.
+    """
+    def column(key):
+        out = []
+        for row in rows:
+            value = (row.get("latency") or {}).get(key)
+            if value is not None:
+                out.append(value)
+        return out
+
+    totals, rtfs = column("total_ms"), column("real_time_factor")
     if not totals:
         return {}
 
@@ -194,9 +208,7 @@ def _latency_summary(rows: list[dict]) -> dict:
         return round(sum(values) / len(values), 4) if values else None
 
     def stage(key):
-        vals = [r["latency"].get(key) for r in rows if r.get("latency")]
-        vals = [v for v in vals if v is not None]
-        return mean(vals)
+        return mean(column(key))
 
     return {
         "utterances": len(totals),
@@ -205,7 +217,12 @@ def _latency_summary(rows: list[dict]) -> dict:
         "total_ms_p90": round(_percentile(totals, 90), 3),
         "total_ms_p95": round(_percentile(totals, 95), 3),
         "real_time_factor_mean": mean(rtfs),
-        "real_time_factor_p90": round(_percentile(rtfs, 90), 4),
+        "real_time_factor_p90": (None if not rtfs
+                                 else round(_percentile(rtfs, 90), 4)),
+        # How many examples contributed to the rate, so a summary over a
+        # partly-unmeasured run cannot read as a full one.
+        "real_time_factor_examples": len(rtfs),
+        "total_ms_examples": len(totals),
         "mel_extraction_ms_mean": stage("mel_extraction_ms"),
         "encoder_ms_mean": stage("encoder_ms"),
         "decoder_prefill_ms_mean": stage("decoder_prefill_ms"),
@@ -233,6 +250,63 @@ def _category_breakdown(rows: list[dict], level) -> dict:
     return out
 
 
+def _budget_hit_from_latency(row: dict, known_budget: int | None = None) -> bool | None:
+    """Infer a token-budget hit for predictions written before the flag existed.
+
+    ``decoder_steps >= token_budget`` is the same condition the runner now
+    records directly. Older predictions carry no ``token_budget`` in their
+    latency block, so the run's configured ``max_new_tokens`` is used instead
+    when it is known; without either, the answer is unknown rather than false.
+    """
+    latency = row.get("latency") or {}
+    steps = latency.get("decoder_steps")
+    budget = latency.get("token_budget")
+    if not isinstance(budget, int) or budget <= 0:
+        budget = known_budget
+    if not isinstance(steps, int) or not isinstance(budget, int) or budget <= 0:
+        return None
+    return steps >= budget
+
+
+def read_run_budget(predictions_path: str | Path) -> int | None:
+    """``max_new_tokens`` from the ``run_config.json`` beside a predictions file."""
+    config = Path(predictions_path).parent / "run_config.json"
+    if not config.is_file():
+        return None
+    try:
+        value = json.loads(config.read_text(encoding="utf-8")).get("max_new_tokens")
+    except Exception:  # noqa: BLE001
+        return None
+    return value if isinstance(value, int) and value > 0 else None
+
+
+def _flag_summary(rows: list[dict], key: str, fallback=None) -> dict:
+    """Count a per-example boolean, distinguishing *absent* from *false*.
+
+    A re-score of predictions written before a flag existed used to report a
+    confident ``0`` — indistinguishable from "measured, none fired" — on
+    exactly the runs the project quotes as headline results. ``recorded`` says
+    whether the file carries the information at all; ``count`` is ``None``
+    when it does not.
+    """
+    present = [r for r in rows if key in r]
+    if present:
+        hits = [r["id"] for r in present if r.get(key)]
+        return {"recorded": True, "count": len(hits), "ids": hits[:20],
+                "examples_with_flag": len(present), "examples": len(rows)}
+    if fallback is not None:
+        inferred = [r["id"] for r in rows if fallback(r)]
+        unknown = sum(1 for r in rows if fallback(r) is None)
+        if unknown < len(rows):
+            return {"recorded": False, "count": None, "ids": inferred[:20],
+                    "inferred_count": len(inferred), "unknown": unknown,
+                    "examples": len(rows),
+                    "note": "flag absent from predictions; inferred from "
+                            "decoder_steps vs token_budget"}
+    return {"recorded": False, "count": None, "ids": [], "examples": len(rows),
+            "note": f"{key} was not recorded in these predictions — absent, not zero"}
+
+
 def score_predictions(
     rows: list[dict],
     *,
@@ -240,6 +314,7 @@ def score_predictions(
     analysis_config: AnalysisConfig | None = None,
     top_confusions: int = 10,
     worst_examples: int = 15,
+    token_budget: int | None = None,
 ) -> tuple[dict, list[dict]]:
     """Score saved predictions. Returns ``(metrics, per_example_rows)``.
 
@@ -283,18 +358,16 @@ def score_predictions(
         # reaching EOS. Any non-zero count makes WER an overstatement (the
         # missing tail counts as deletions): re-run with a larger
         # --max-new-tokens before reading the number.
-        "truncated_by_token_budget": {
-            "count": sum(1 for r in rows if r.get("hit_token_budget")),
-            "ids": [r["id"] for r in rows if r.get("hit_token_budget")][:20],
-        },
+        "truncated_by_token_budget": _flag_summary(
+            rows, "hit_token_budget",
+            fallback=lambda row: _budget_hit_from_latency(row, token_budget),
+        ),
         # What the decode guards did on this run. A no-speech suppression on a
         # clip that *does* contain speech is a deletion of the whole
         # utterance, so this count has to be read next to the WER.
         "decode_guards_fired": {
-            "no_speech": sum(1 for r in rows if r.get("no_speech")),
-            "no_speech_ids": [r["id"] for r in rows if r.get("no_speech")][:20],
-            "repetition": sum(1 for r in rows if r.get("stopped_on_repetition")),
-            "repetition_ids": [r["id"] for r in rows if r.get("stopped_on_repetition")][:20],
+            "no_speech": _flag_summary(rows, "no_speech"),
+            "repetition": _flag_summary(rows, "stopped_on_repetition"),
         },
         "examples": len(rows),
         "headline": {
@@ -601,11 +674,14 @@ def command_score(args: argparse.Namespace) -> int:
     rows = read_jsonl(args.predictions)
     out_dir = Path(args.out_dir or Path(args.predictions).parent)
     out_dir.mkdir(parents=True, exist_ok=True)
-    _finalize(rows, args, out_dir)
+    # Predictions written before hit_token_budget existed can still be checked
+    # for truncation against the budget the run recorded.
+    _finalize(rows, args, out_dir, token_budget=read_run_budget(args.predictions))
     return 0
 
 
-def _finalize(rows: list[dict], args: argparse.Namespace, out_dir: Path) -> None:
+def _finalize(rows: list[dict], args: argparse.Namespace, out_dir: Path,
+              token_budget: int | None = None) -> None:
     metrics, per_example = score_predictions(
         rows,
         level=args.level,
@@ -614,6 +690,7 @@ def _finalize(rows: list[dict], args: argparse.Namespace, out_dir: Path) -> None
             min_run=args.min_run,
             rare_threshold=args.rare_threshold,
         ),
+        token_budget=token_budget,
     )
     metrics["provenance"] = provenance()
     write_json(out_dir / "metrics.json", metrics)
@@ -629,14 +706,29 @@ def _print_report(metrics: dict) -> None:
     print(f"Examples: {metrics['examples']}   level: {metrics['reporting_level']}")
     print(f"WER: {head['wer_percent']}%    CER: {head['cer_percent']}%")
     guards = metrics.get("decode_guards_fired") or {}
-    if guards.get("no_speech") or guards.get("repetition"):
-        print(f"decode guards fired: no_speech on {guards.get('no_speech', 0)} clip(s), "
-              f"repetition on {guards.get('repetition', 0)}")
+    for name, summary in guards.items():
+        if not isinstance(summary, dict):
+            continue
+        if not summary.get("recorded"):
+            print(f"decode guard '{name}': NOT RECORDED in these predictions "
+                  f"(absent, not zero)")
+        elif summary.get("count"):
+            print(f"decode guard '{name}' fired on {summary['count']} clip(s): "
+                  f"{', '.join(summary['ids'][:3])}")
     cut = metrics.get("truncated_by_token_budget") or {}
     if cut.get("count"):
         print(f"!! {cut['count']} hypothesis/es were CUT OFF at the token budget "
               f"(decode never reached EOS). WER is overstated; re-run with a larger "
               f"--max-new-tokens. e.g. {', '.join(cut['ids'][:3])}")
+    elif not cut.get("recorded"):
+        inferred = cut.get("inferred_count")
+        if inferred:
+            print(f"!! token-budget flag absent from these predictions, but "
+                  f"{inferred} hypothesis/es have decoder_steps at the budget — "
+                  f"likely truncated. Re-run rather than citing this WER.")
+        else:
+            print("token-budget truncation: NOT RECORDED in these predictions "
+                  "(absent, not zero)")
     print(f"{'-' * 62}")
     print("Normalization sensitivity (WER %):")
     print(f"  raw (none)            {sens['raw_wer_percent']}")

@@ -16,12 +16,20 @@ every later number meaningless.
 Built for a hosted notebook, where the session dies before the suite
 finishes more often than not:
 
-* **Resumable by default.** A step whose evidence already exists is skipped,
-  so re-running after a disconnect continues instead of starting over. Use
-  ``--force`` to redo everything, or ``--force-steps a,b`` for some.
-* ``--mirror DIR`` copies each step's evidence to ``DIR`` as soon as that
-  step finishes (point it at a mounted Drive). Without it, a session that
-  dies takes its results with it.
+* **Resumable by default**, and completion is an explicit claim rather than a
+  guess about files. Three of the four harnesses rewrite their evidence file
+  after *every* unit of work — ``gpu_validation`` saves ``report.json`` after
+  each of its 16 checks, ``llm_bakeoff`` rewrites ``summary.json`` after each
+  model (including a failed one) — so "the evidence file exists" says nothing
+  about whether the step finished. This driver therefore records each step's
+  exit code in ``.bench_state.json`` and only skips a step it saw succeed.
+  ``--force`` redoes everything, ``--force-steps a,b`` some.
+* **Surviving the session.** A disconnect gives you a fresh VM and an empty
+  checkout, so resume only helps if the evidence outlives it. Either point
+  ``--out-root`` at a mounted Drive (simplest — the state file lives beside
+  the evidence and resume just works), or use ``--mirror DIR``, which copies
+  path-preservingly after each step and is restored into ``--out-root`` at
+  startup.
 
 Nothing here prints a conclusion. Read the JSON.
 """
@@ -142,52 +150,101 @@ def steps(args) -> list[dict]:
     ]
 
 
-#: A step is "already done" when one of these exists inside its output
-#: directory — the file each harness writes last.
-EVIDENCE_FILES = ("metrics.json", "summary.json", "report.json", "model.bin")
+#: Where the driver records which steps it saw succeed. Lives under
+#: --out-root so it travels with the evidence.
+STATE_FILE = ".bench_state.json"
+#: Never mirrored: large, regenerable, or not evidence.
+MIRROR_SKIP = ("*.wav", "*.mp3", "*.bin", "*.pt", "*.safetensors")
 
 
-def is_done(step: dict) -> bool:
-    """Has this step already produced its evidence?
+def load_state(out_root: Path) -> dict:
+    path = out_root / STATE_FILE
+    if not path.is_file():
+        return {}
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except Exception:  # noqa: BLE001 - a corrupt state file just means re-run
+        return {}
 
-    Deliberately checks for the *harness output*, not just the directory: an
-    interrupted run leaves the directory behind, and treating that as done
-    would silently skip a step that never finished.
+
+def save_state(out_root: Path, state: dict) -> None:
+    out_root.mkdir(parents=True, exist_ok=True)
+    (out_root / STATE_FILE).write_text(json.dumps(state, indent=2) + "\n",
+                                       encoding="utf-8")
+
+
+def is_done(step: dict, state: dict) -> bool:
+    """Did a previous run of this driver see this step succeed?
+
+    Completion is an explicit claim, not an inference from files. The
+    harnesses rewrite their evidence file after every unit of work —
+    gpu_validation after each of 16 checks, llm_bakeoff after each model
+    including a failed one — so a session that died mid-step leaves a
+    perfectly well-formed report.json behind. Skipping on that produced a
+    green manifest over a sweep that had run two checks.
     """
+    record = state.get(step["name"])
+    if not isinstance(record, dict) or record.get("returncode") != 0:
+        return False
     out = step.get("out")
     if out is None:
         return False                      # cheap steps always re-run
-    out = Path(out)
-    if out.suffix == ".json":
-        return out.is_file()
-    if not out.is_dir():
-        return False
-    if any((out / name).is_file() for name in EVIDENCE_FILES):
-        return True
-    # A grid harness writes per-config subdirectories.
-    return any((child / "metrics.json").is_file()
-               for child in out.iterdir() if child.is_dir())
+    return Path(out).exists()             # evidence must still be there
 
 
-def mirror_output(step: dict, mirror_root: Path) -> str | None:
-    """Copy a step's evidence somewhere that survives the session."""
+def mirror_output(step: dict, out_root: Path, mirror_root: Path) -> str | None:
+    """Copy a step's evidence somewhere that survives the session.
+
+    Path-preserving: flattening to ``mirror/<basename>`` meant the mirror
+    could not be restored into --out-root, so resume never fired across the
+    disconnect it exists for.
+    """
     out = step.get("out")
     if out is None:
         return None
     out = Path(out)
     if not out.exists():
         return None
-    target = mirror_root / out.name
+    try:
+        relative = out.relative_to(out_root)
+    except ValueError:
+        relative = Path(out.name)
+    target = mirror_root / relative
     try:
         if out.is_dir():
             shutil.copytree(out, target, dirs_exist_ok=True,
-                            ignore=shutil.ignore_patterns("*.wav", "*.mp3", "*.bin", "*.pt"))
+                            ignore=shutil.ignore_patterns(*MIRROR_SKIP))
         else:
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(out, target)
         return str(target)
     except Exception as exc:  # noqa: BLE001 - a failed mirror must not fail the run
         return f"mirror failed: {type(exc).__name__}: {exc}"
+
+
+def restore_from_mirror(out_root: Path, mirror_root: Path) -> int:
+    """Copy a surviving mirror back into --out-root before planning.
+
+    This is what makes --mirror actually resumable: a disconnect leaves a
+    fresh VM with an empty checkout, and without this the driver plans as
+    though nothing had ever run.
+    """
+    if not mirror_root.is_dir():
+        return 0
+    restored = 0
+    for source in mirror_root.rglob("*"):
+        if not source.is_file():
+            continue
+        target = out_root / source.relative_to(mirror_root)
+        if target.exists():
+            continue
+        target.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            shutil.copy2(source, target)
+            restored += 1
+        except Exception:  # noqa: BLE001 - a partial restore just re-runs a step
+            continue
+    return restored
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -227,9 +284,14 @@ def main(argv: list[str] | None = None) -> int:
 
     force_steps = ({n.strip() for n in args.force_steps.split(",")}
                    if args.force_steps else set())
+    out_root = Path(args.out_root)
     mirror_root = Path(args.mirror) if args.mirror else None
     if mirror_root:
         mirror_root.mkdir(parents=True, exist_ok=True)
+        restored = restore_from_mirror(out_root, mirror_root)
+        if restored:
+            print(f"restored {restored} file(s) from {mirror_root}")
+    state = load_state(out_root)
 
     logs = Path(args.logs)
     logs.mkdir(parents=True, exist_ok=True)
@@ -241,7 +303,7 @@ def main(argv: list[str] | None = None) -> int:
     print(f"{len(plan)} step(s); logs in {logs}\n")
     for index, step in enumerate(plan, 1):
         log_path = logs / f"{step['name']}.log"
-        if not args.force and step["name"] not in force_steps and is_done(step):
+        if not args.force and step["name"] not in force_steps and is_done(step, state):
             print(f"[{index}/{len(plan)}] {step['name']}: already done "
                   f"({step['out']}) — skipping", flush=True)
             records.append({"step": step["name"], "decides": step["decides"],
@@ -269,7 +331,14 @@ def main(argv: list[str] | None = None) -> int:
             tail = " | ".join(lines[-3:])[:300]
         except Exception:  # noqa: BLE001
             pass
-        mirrored = mirror_output(step, mirror_root) if mirror_root else None
+        state[step["name"]] = {"returncode": proc.returncode,
+                               "seconds": round(seconds, 1),
+                               "out": str(step["out"]) if step["out"] else None}
+        save_state(out_root, state)
+        mirrored = (mirror_output(step, out_root, mirror_root) if mirror_root else None)
+        if mirror_root:
+            mirror_output({"name": "state", "out": out_root / STATE_FILE},
+                          out_root, mirror_root)
         records.append({
             "step": step["name"], "decides": step["decides"],
             "cmd": step["cmd"], "returncode": proc.returncode,

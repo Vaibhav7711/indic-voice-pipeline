@@ -99,18 +99,23 @@ class ASRMetrics:
     language_probability: float | None = None
 
     @property
-    def mean_decode_ms(self) -> float:
-        return sum(self.decode_ms) / len(self.decode_ms) if self.decode_ms else 0.0
+    def mean_decode_ms(self) -> float | None:
+        """None when no decode step ran — 0.0 would read as "instant"."""
+        return sum(self.decode_ms) / len(self.decode_ms) if self.decode_ms else None
 
     @property
     def total_decode_ms(self) -> float:
         return sum(self.decode_ms)
 
     @property
-    def real_time_factor(self) -> float:
-        """RTF = processing_time / audio_duration. < 1.0 = faster than real-time."""
+    def real_time_factor(self) -> float | None:
+        """RTF = processing_time / audio_duration. < 1.0 = faster than real-time.
+
+        ``None`` when the duration is unknown or zero: the rate is undefined,
+        and 0.0 would be averaged into a benchmark as "infinitely fast".
+        """
         if self.audio_duration_seconds <= 0:
-            return 0.0
+            return None
         return (self.total_ms / 1000.0) / self.audio_duration_seconds
 
     def as_dict(self) -> dict:
@@ -148,9 +153,9 @@ class LongFormMetrics:
     compression_ratio: float = 0.0
 
     @property
-    def real_time_factor(self) -> float:
+    def real_time_factor(self) -> float | None:
         if self.audio_duration_seconds <= 0:
-            return 0.0
+            return None
         return (self.total_ms / 1000.0) / self.audio_duration_seconds
 
     def as_dict(self) -> dict:

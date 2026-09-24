@@ -76,7 +76,8 @@ def main():
     print("-" * 50)
     print(f"  TOTAL PIPELINE:         {m.total_pipeline_ms:8.0f} ms")
     print(f"  Audio → 1st LLM tok:    {m.audio_to_first_llm_token_ms:8.0f} ms")
-    print(f"  ASR RTF:                {m.asr.real_time_factor:8.3f}")
+    rtf = m.asr.real_time_factor
+    print(f"  ASR RTF:                {'undefined' if rtf is None else f'{rtf:8.3f}'}")
     print(f"  Peak VRAM:              {m.peak_allocated_bytes / (1024**3):.2f} GiB")
 
 

@@ -561,7 +561,11 @@ def check_voice_turn(llm_runner, transcript: str):
     from tts import EdgeStreamingSynthesizer
 
     turn = VoiceTurn(llm_runner, EdgeStreamingSynthesizer(language="hi"), response_language="Hindi")
-    result = turn.run(transcript, speech_end_to_transcript_ms=0.0)
+    # No endpointer runs in this check, so speech-end → transcript was never
+    # measured. Passing 0.0 made response_latency_ms a plausible small number
+    # instead of None — which is how a cited "719 ms" turn latency came to
+    # omit ~3.8 s of LLM decode. The turn's own rule: None, never zero.
+    result = turn.run(transcript, speech_end_to_transcript_ms=None)
     if result.state.value != "completed":
         raise AssertionError(f"turn ended {result.state.value}: {result.error}")
     if result.speech and result.speech.error:

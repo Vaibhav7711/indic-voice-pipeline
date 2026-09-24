@@ -261,7 +261,8 @@ class NotebookAgent:
             "response": result.response,
             "state": result.state.value,
             "asr_ms": round(asr.metrics.total_ms, 1),
-            "asr_rtf": round(asr.metrics.real_time_factor, 3),
+            "asr_rtf": (None if asr.metrics.real_time_factor is None
+                        else round(asr.metrics.real_time_factor, 3)),
             "asr_hit_token_budget": asr.metrics.hit_token_budget,
             "first_token_ms": result.metrics.final_transcript_to_first_llm_token_ms,
             "to_audio_ms": result.metrics.first_llm_token_to_playback_start_ms,
