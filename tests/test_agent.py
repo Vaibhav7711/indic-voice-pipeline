@@ -890,3 +890,49 @@ class TestTimeToFirstAudioDecomposes:
         m = VoiceTurn(Silent(), Tts()).run("x", sink=BufferSink()).metrics
         assert m.tts_synthesis_ms is None
         assert m.first_llm_token_to_playback_start_ms is None
+
+
+class TestSentenceBufferInvariants:
+    def test_emitted_has_exactly_one_writer(self):
+        """`emitted` feeds speech.sentences, the turn's evidence and — on a
+        late barge-in — the conversation history, so a duplicate there is a
+        duplicate in what the model is told it said."""
+        from tts.streaming import SentenceBuffer
+
+        for text in ("नमस्ते। मैं ठीक हूँ",
+                     "एक। दो। तीन।",
+                     "छोटा",
+                     "पहला वाक्य पूरा है। दूसरा भी पूरा है।"):
+            buffer = SentenceBuffer()
+            fed = []
+            for ch in text:
+                fed.extend(buffer.feed(ch))
+            flushed = buffer.flush()
+            assert buffer.emitted == fed + flushed, text
+
+    def test_clause_cut_never_lands_inside_a_word(self):
+        """'या' is a substring of the very common 'क्या'; cutting on the raw
+        index split that word and sent a mispronounced stub to the
+        synthesizer."""
+        from tts.streaming import SentenceBuffer
+
+        text = "मुझे बताइए आप दिल्ली के मौसम के बारे में क्या जानना चाहते हैं इस समय"
+        buffer = SentenceBuffer()
+        out = []
+        for ch in text:
+            out.extend(buffer.feed(ch))
+        out.extend(buffer.flush())
+        assert "".join(out).replace(" ", "") == text.replace(" ", "")
+        for unit in out:
+            assert "क्" not in unit or "क्या" in unit or "क्यों" in unit, unit
+            assert not unit.startswith("या "), unit
+
+    def test_clause_cut_still_fires_on_a_real_connective(self):
+        from tts.streaming import SentenceBuffer
+
+        buffer = SentenceBuffer(min_chars=8, max_unit_chars=30)
+        out = buffer.feed("मुझे यह पसंद है लेकिन मैं जा नहीं सकता क्योंकि देर हो गई है।")
+        out.extend(buffer.flush())
+        assert out[0] == "मुझे यह पसंद है"
+        assert out[1].startswith("लेकिन")
+        assert buffer.emitted == out

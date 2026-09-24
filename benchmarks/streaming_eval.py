@@ -82,15 +82,48 @@ SESSION_GRID: dict[str, dict] = {
                  "semantic_endpointing": False, "emit_partials": False},
     "early": {"early_final_silence_ms": 300, "incremental_finals": False,
               "semantic_endpointing": False, "emit_partials": False},
+    # partial_interval_ms must be POSITIVE: the session treats <= 0 as
+    # "partials off", so the two incremental modes previously emitted none,
+    # incremental_finals never found a partial to reuse, and early-incr was
+    # identical to early. The benchmark drives an audio clock, so 1 ms is
+    # effectively "no wall-clock limit" and min_partial_audio_ms is the real
+    # gate. assert_grid_produced_partials() below fails loudly if this
+    # regresses.
     "early-incr": {"early_final_silence_ms": 300, "incremental_finals": True,
                    "semantic_endpointing": False, "emit_partials": True,
-                   "partial_interval_ms": 0, "min_partial_audio_ms": 1200},
+                   "partial_interval_ms": 1, "min_partial_audio_ms": 1200},
     "early-sem": {"early_final_silence_ms": 300, "incremental_finals": False,
                   "semantic_endpointing": True, "emit_partials": False},
     "full": {"early_final_silence_ms": 300, "incremental_finals": True,
              "semantic_endpointing": True, "emit_partials": True,
-             "partial_interval_ms": 0, "min_partial_audio_ms": 1200},
+             "partial_interval_ms": 1, "min_partial_audio_ms": 1200},
 }
+
+
+#: Grid configs that only mean anything if partials actually happened.
+INCREMENTAL_CONFIGS = ("early-incr", "full")
+
+
+def grid_sanity(name: str, rows: list[dict]) -> str | None:
+    """Did this config measure what its name claims? Returns a warning or None.
+
+    A silent no-op is the failure mode that matters here: ``early-incr``
+    with partials disabled runs happily and reports numbers identical to
+    ``early``, which reads as "incremental decoding buys nothing" rather
+    than "incremental decoding never ran".
+    """
+    base = name.split("+")[-1]
+    if base not in INCREMENTAL_CONFIGS:
+        return None
+    partials = sum(r.get("partials", 0) for r in rows)
+    reused = sum(r.get("finals_reused_partial", 0) for r in rows)
+    if partials == 0:
+        return (f"{name}: ZERO partials — incremental decoding never ran, so these "
+                f"numbers say nothing about it (check partial_interval_ms > 0)")
+    if reused == 0:
+        return (f"{name}: {partials} partials but no final reused one — the "
+                f"incremental path never engaged")
+    return None
 
 
 def session_kwargs(name: str) -> dict:
@@ -401,6 +434,10 @@ def main(argv: list[str] | None = None) -> int:
         metrics = aggregate(rows, args.level)
         metrics["vad"] = grid[name][0].as_dict()
         metrics["session"] = grid[name][1]
+        warning = grid_sanity(name, rows)
+        metrics["sanity_warning"] = warning
+        if warning:
+            print(f"  !! {warning}")
         write_json(cfg_dir / "metrics.json", metrics)
         summary[name] = {
             "wer_vs_reference": metrics["wer_vs_reference"]["micro_percent"],

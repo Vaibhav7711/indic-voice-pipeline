@@ -181,7 +181,13 @@ Both must clear before a partial runs:
   a stall), where the audio test alone would fire constantly.
 
 They fail in different situations and neither covers the other. Set
-`partial_interval_ms=0` or `emit_partials=False` to disable partials entirely.
+`emit_partials=False` to disable partials entirely; `partial_interval_ms <= 0`
+also disables them, which is a trap — it reads as "no gap required" and
+silently turned the benchmark's two incremental grid rows into copies of
+`early`, so `early-incr` appeared to buy nothing rather than never having
+run. Use a small positive value when only `min_partial_audio_ms` should gate,
+and note that `benchmarks/streaming_eval.py` now fails loudly
+(`sanity_warning`) if an incremental config produces no partials.
 
 ### Finals during the silence wait (candidates)
 

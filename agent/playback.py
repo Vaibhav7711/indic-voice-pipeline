@@ -201,6 +201,7 @@ class PlaybackSession:
         self._cancel = threading.Event()
         self._cancel_reason = ""
         self._lock = threading.Lock()
+        self._event_lock = threading.Lock()
         self._sequence = 0
         self._started_at: float | None = None
 
@@ -219,10 +220,15 @@ class PlaybackSession:
         bytes_written: int = 0,
         detail: str = "",
     ) -> PlaybackEvent:
-        self._sequence += 1
+        # cancel() and the playback loop both emit, and ``+= 1`` is a
+        # read-modify-write, so the counter needs its own lock. A separate one
+        # from self._lock because _emit is called from inside that lock.
+        with self._event_lock:
+            self._sequence += 1
+            sequence = self._sequence
         event = PlaybackEvent(
             kind=kind,
-            sequence=self._sequence,
+            sequence=sequence,
             playback_id=self.playback_id,
             state=self.state,
             elapsed_ms=self._elapsed(),
@@ -250,7 +256,16 @@ class PlaybackSession:
                 )
                 return False
             self._cancel_reason = reason
-        self._cancel.set()
+            # Set the flag INSIDE the lock. play() commits its terminal state
+            # under this same lock by reading self._cancel.is_set(); setting
+            # the flag after releasing it leaves a window where cancel()
+            # returns True (the caller believes the barge-in landed) while
+            # playback commits COMPLETED. The turn would then report
+            # barge_in=False and Conversation.record_turn would store the
+            # whole generated response as heard — the precise invariant
+            # agent/conversation.py exists to protect — and the sink would be
+            # closed (draining queued audio) instead of stopped.
+            self._cancel.set()
         return True
 
     @property

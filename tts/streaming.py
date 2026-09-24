@@ -110,8 +110,15 @@ _ANY_TERMINATOR_THEN_SPACE = re.compile(r"[।॥.!?…]+\s")
 #: Commas and semicolons first, then Hindi subordinators and conjunctions —
 #: places a speaker would draw breath anyway.
 _CLAUSE_PUNCT = re.compile(r"[,;:—–]\s")
-_CLAUSE_WORDS = ("कि ", "और ", "लेकिन ", "मगर ", "तो ", "क्योंकि ", "इसलिए ",
-                 "जब ", "अगर ", "या ", "फिर ", "जो ")
+#: Matched only at a word start. Without the boundary, "या " is a substring of
+#: the very common "क्या " (क ् य ा ␣) and a long sentence containing it was
+#: cut inside that word, sending a mispronounced stub and an orphan syllable
+#: to the synthesizer as separate units.
+_CLAUSE_WORDS = ("कि", "और", "लेकिन", "मगर", "तो", "क्योंकि", "इसलिए",
+                 "जब", "अगर", "या", "फिर", "जो")
+_CLAUSE_WORD_RE = re.compile(
+    r"(?:(?<=\s)|(?<=^))(?:" + "|".join(_CLAUSE_WORDS) + r")\s",
+)
 
 
 class SentenceBuffer:
@@ -166,18 +173,22 @@ class SentenceBuffer:
         return out
 
     def flush(self) -> list[str]:
-        out: list[str] = []
+        """Emit whatever is left. ``emitted`` has exactly one writer.
+
+        ``_merge`` is the only place that appends to ``self.emitted``; this
+        method used to ``extend`` it as well, which duplicated every unit
+        flush produced and propagated into ``speech.sentences``, the turn's
+        evidence, and — on a late barge-in — the conversation history.
+        """
         tail = self._buffer.strip()
         self._buffer = ""
-        if tail:
-            out.extend(self._merge(tail))
+        out = self._merge(tail) if tail else []
         if self._pending:
-            if out:
-                out[-1] = f"{out[-1]} {self._pending}".strip()
-            else:
-                out.append(self._pending)
+            # _merge clears _pending whenever it emits, so reaching here
+            # means nothing was emitted and the held fragment is all there is.
+            out.append(self._pending)
+            self.emitted.append(self._pending)
             self._pending = ""
-        self.emitted.extend(out)
         return out
 
     # -- internals --------------------------------------------------------
@@ -205,11 +216,10 @@ class SentenceBuffer:
         best = None
         for match in _CLAUSE_PUNCT.finditer(window):
             best = match.end()
-        for word in _CLAUSE_WORDS:
-            index = window.rfind(word)
-            if index > 0:
-                # Cut *before* the connective: it belongs to what follows.
-                best = max(best or 0, index)
+        for match in _CLAUSE_WORD_RE.finditer(window):
+            # Cut *before* the connective: it belongs to what follows.
+            if match.start() > 0:
+                best = max(best or 0, match.start())
         if best is None or best < self.min_chars:
             return None
         return best

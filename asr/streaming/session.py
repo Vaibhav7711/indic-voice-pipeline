@@ -133,7 +133,10 @@ class StreamingConfig:
     vad: VADConfig = field(default_factory=VADConfig)
 
     emit_partials: bool = True
-    #: Wall-clock gap between partial decodes.
+    #: Wall-clock gap between partial decodes. **Zero or negative disables
+    #: partials entirely** — it does not mean "no gap required". Use
+    #: ``emit_partials=False`` to say that explicitly, and a small positive
+    #: value when only ``min_partial_audio_ms`` should gate.
     partial_interval_ms: int = 700
     #: New audio required since the last partial.
     min_partial_audio_ms: int = 500
@@ -482,17 +485,26 @@ class StreamingSession:
             return out
 
         partial = self._partial_state
+        overlap_samples = int(self.config.incremental_overlap_seconds * rate)
         usable = (
             self.config.incremental_finals and partial is not None
             and not partial["is_tail"] and not long_form
-            and partial["end"] > start
+            # The tail has to *be* a tail. Requiring only end > start meant
+            # that whenever the partial covered less than the overlap — the
+            # normal case for a short utterance, since the first partial
+            # fires around 1 s and the overlap defaults to 2 s — tail_start
+            # clamped to the utterance start and the "incremental" path
+            # full-decoded the whole thing and then merge-concatenated it
+            # onto the partial's text. The merge only strips an exact
+            # suffix/prefix token match, so a revised first word duplicated
+            # the opening instead.
+            and min(partial["end"], end_sample) - overlap_samples > start
         )
         if usable:
             # A partial decoded during the silence wait may reach past
             # end_sample; either way the last ``overlap`` seconds before the
             # end are re-decoded so the merge can fix the seam.
-            overlap = int(self.config.incremental_overlap_seconds * rate)
-            tail_start = max(start, min(partial["end"], end_sample) - overlap)
+            tail_start = max(start, min(partial["end"], end_sample) - overlap_samples)
             tail = self._audio_range(tail_start, end_sample)
             result = self._run_asr(tail, long_form=False)
             tail_text = getattr(result, "text", "") or ""

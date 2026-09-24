@@ -123,3 +123,66 @@ def test_session_grid_names():
 
     assert {"baseline", "early", "early-incr", "early-sem", "full"} <= set(SESSION_GRID)
     assert session_kwargs("full")["incremental_finals"] and session_kwargs("full")["semantic_endpointing"]
+
+
+class TestGridActuallyMeasuresWhatItClaims:
+    def test_incremental_configs_use_a_positive_partial_interval(self):
+        """The session treats partial_interval_ms <= 0 as 'partials off', so a
+        zero here made early-incr silently identical to early."""
+        from benchmarks.streaming_eval import INCREMENTAL_CONFIGS, session_kwargs
+
+        for name in INCREMENTAL_CONFIGS:
+            kwargs = session_kwargs(name)
+            assert kwargs["emit_partials"] is True, name
+            assert kwargs["partial_interval_ms"] > 0, name
+            assert kwargs["incremental_finals"] is True, name
+
+    def test_sanity_check_flags_a_config_that_produced_no_partials(self):
+        from benchmarks.streaming_eval import grid_sanity
+
+        rows = [{"partials": 0, "finals_reused_partial": 0} for _ in range(5)]
+        warning = grid_sanity("early-incr", rows)
+        assert warning and "ZERO partials" in warning
+
+    def test_sanity_check_flags_partials_that_were_never_reused(self):
+        from benchmarks.streaming_eval import grid_sanity
+
+        rows = [{"partials": 4, "finals_reused_partial": 0} for _ in range(5)]
+        warning = grid_sanity("full", rows)
+        assert warning and "never engaged" in warning
+
+    def test_healthy_incremental_run_and_non_incremental_configs_pass(self):
+        from benchmarks.streaming_eval import grid_sanity
+
+        healthy = [{"partials": 4, "finals_reused_partial": 1} for _ in range(5)]
+        assert grid_sanity("early-incr", healthy) is None
+        assert grid_sanity("baseline", [{"partials": 0}]) is None
+        assert grid_sanity("default+early-incr", healthy) is None
+
+
+class TestIncrementalTailIsActuallyATail:
+    def test_short_utterance_falls_back_to_a_full_decode(self, tmp_path):
+        """When the partial covers less than the overlap, there is no tail to
+        decode; the old code full-decoded and then concatenated onto the
+        partial's text, duplicating the opening."""
+        from benchmarks.streaming_eval import session_kwargs
+
+        agent_kwargs = session_kwargs("early-incr")
+        t = _Transcriber()
+        out = stream_clip(t, _speech(1.2), vad_from_name("default"), language="hi",
+                          lead=0.5, trail=1.0, session=agent_kwargs)
+        finals = out["finals"]
+        assert finals
+        for final in finals:
+            if final["reused_partial"]:
+                # If it claims reuse, the decode must be strictly shorter than
+                # the utterance — otherwise it was not incremental at all.
+                assert final["decoded_seconds"] < final["seconds"] - 0.05, final
+
+    def test_long_utterance_can_reuse_a_partial(self, tmp_path):
+        from benchmarks.streaming_eval import session_kwargs
+
+        out = stream_clip(_Transcriber(), _speech(8.0), vad_from_name("default"),
+                          language="hi", lead=0.5, trail=1.0,
+                          session=session_kwargs("early-incr"))
+        assert out["partials"] > 0, "a positive interval must let partials run"
