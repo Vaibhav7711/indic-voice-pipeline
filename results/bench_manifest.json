@@ -1,0 +1,164 @@
+{
+  "adapter": "/content/v2-final/best",
+  "total_minutes": 3.3,
+  "steps": [
+    {
+      "step": "unit_tests",
+      "decides": "nothing regressed in the 545 CPU tests",
+      "cmd": [
+        "/usr/bin/python3",
+        "-m",
+        "pytest",
+        "-q",
+        "-p",
+        "no:cacheprovider"
+      ],
+      "returncode": 0,
+      "seconds": 84.4,
+      "skipped": false,
+      "log": "results/bench_logs/unit_tests.log",
+      "out": null,
+      "mirrored": null,
+      "tail": "........................................................................ [ 84%] | ........................................................................ [ 96%] | ........................                                                 [100%]"
+    },
+    {
+      "step": "llm",
+      "decides": "which LLM \u2014 the largest open quality question",
+      "cmd": [
+        "/usr/bin/python3",
+        "-m",
+        "benchmarks.llm_bakeoff",
+        "--models",
+        "Qwen/Qwen3-0.6B,Qwen/Qwen3-1.7B,Qwen/Qwen3-4B",
+        "--out-dir",
+        "results/llm_bakeoff"
+      ],
+      "returncode": 0,
+      "seconds": 0.0,
+      "skipped": true,
+      "log": "results/bench_logs/llm.log",
+      "out": "results/llm_bakeoff",
+      "tail": "skipped: evidence already present"
+    },
+    {
+      "step": "tts",
+      "decides": "edge (network) vs MMS (local) on this GPU",
+      "cmd": [
+        "/usr/bin/python3",
+        "-m",
+        "benchmarks.tts_bakeoff",
+        "--backends",
+        "edge,mms",
+        "--out-dir",
+        "results/tts_bakeoff"
+      ],
+      "returncode": 0,
+      "seconds": 0.0,
+      "skipped": true,
+      "log": "results/bench_logs/tts.log",
+      "out": "results/tts_bakeoff",
+      "tail": "skipped: evidence already present"
+    },
+    {
+      "step": "streaming",
+      "decides": "incremental finals and semantic endpointing on/off",
+      "cmd": [
+        "/usr/bin/python3",
+        "-m",
+        "benchmarks.streaming_eval",
+        "--model",
+        "openai/whisper-large-v3-turbo",
+        "--adapter",
+        "/content/v2-final/best",
+        "--split",
+        "test",
+        "--limit",
+        "100",
+        "--seed",
+        "0",
+        "--dtype",
+        "float16",
+        "--session-grid",
+        "baseline,early,early-incr,early-sem,full",
+        "--out-dir",
+        "results/streaming_eval"
+      ],
+      "returncode": 0,
+      "seconds": 0.0,
+      "skipped": true,
+      "log": "results/bench_logs/streaming.log",
+      "out": "results/streaming_eval",
+      "tail": "skipped: evidence already present"
+    },
+    {
+      "step": "sweep",
+      "decides": "the 16 correctness checks, incl. compiled decode on this GPU",
+      "cmd": [
+        "/usr/bin/python3",
+        "scripts/gpu_validation.py",
+        "--whisper-model",
+        "openai/whisper-large-v3-turbo",
+        "--adapter",
+        "/content/v2-final/best",
+        "--skip-unit-tests",
+        "--out-dir",
+        "results/gpu_validation"
+      ],
+      "returncode": 0,
+      "seconds": 0.0,
+      "skipped": true,
+      "log": "results/bench_logs/sweep.log",
+      "out": "results/gpu_validation",
+      "tail": "skipped: evidence already present"
+    },
+    {
+      "step": "ct2_convert",
+      "decides": "engine weights exist (prerequisite for the next step)",
+      "cmd": [
+        "/usr/bin/python3",
+        "scripts/convert_ct2.py",
+        "--model",
+        "openai/whisper-large-v3-turbo",
+        "--adapter",
+        "/content/v2-final/best",
+        "--quantization",
+        "int8_float16",
+        "--out",
+        "models/ct2/turbo-hindi-v2"
+      ],
+      "returncode": 0,
+      "seconds": 115.1,
+      "skipped": false,
+      "log": "results/bench_logs/ct2_convert.log",
+      "out": "models/ct2/turbo-hindi-v2",
+      "mirrored": "/content/drive/MyDrive/ivp-results/turbo-hindi-v2",
+      "tail": "saved merged model to models/ct2/turbo-hindi-v2-hf-merged | /usr/bin/python3 -m ctranslate2.converters.transformers --model models/ct2/turbo-hindi-v2-hf-merged --output_dir models/ct2/turbo-hindi-v2 --quantization int8_float16 --force | CTranslate2 model at models/ct2/turbo-hindi-v2"
+    },
+    {
+      "step": "ct2_check",
+      "decides": "engine speedup, gated on matching the explicit runner",
+      "cmd": [
+        "/usr/bin/python3",
+        "scripts/gpu_validation.py",
+        "--whisper-model",
+        "openai/whisper-large-v3-turbo",
+        "--adapter",
+        "/content/v2-final/best",
+        "--skip-unit-tests",
+        "--skip-network",
+        "--ct2-model",
+        "models/ct2/turbo-hindi-v2",
+        "--ct2-compute-type",
+        "int8_float16",
+        "--out-dir",
+        "results/gpu_validation-ct2"
+      ],
+      "returncode": 0,
+      "seconds": 0.0,
+      "skipped": true,
+      "log": "results/bench_logs/ct2_check.log",
+      "out": "results/gpu_validation-ct2",
+      "tail": "skipped: evidence already present"
+    }
+  ]
+}

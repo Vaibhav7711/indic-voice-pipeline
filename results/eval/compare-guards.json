@@ -1,0 +1,95 @@
+{
+  "baseline": {
+    "dir": "results/eval/v2-guards-off",
+    "model": "openai/whisper-large-v3-turbo",
+    "adapter": "/content/v2-final/best"
+  },
+  "candidate": {
+    "dir": "results/eval/v2-guards-on",
+    "model": "openai/whisper-large-v3-turbo",
+    "adapter": "/content/v2-final/best"
+  },
+  "comparable": true,
+  "selection_warnings": [],
+  "examples": {
+    "baseline": 300,
+    "candidate": 300
+  },
+  "wer": {
+    "before": 23.8265,
+    "after": 23.8265,
+    "points": 0.0,
+    "relative_percent": 0.0
+  },
+  "cer": {
+    "before": 8.4585,
+    "after": 8.4585,
+    "points": 0.0,
+    "relative_percent": 0.0
+  },
+  "latency_p50_ms": {
+    "before": 764.222,
+    "after": 765.675,
+    "points": 1.453,
+    "relative_percent": -0.19
+  },
+  "latency_p90_ms": {
+    "before": 1093.112,
+    "after": 1086.229,
+    "points": -6.883,
+    "relative_percent": 0.63
+  },
+  "real_time_factor": {
+    "before": 0.0738,
+    "after": 0.0727,
+    "points": -0.0011,
+    "relative_percent": 1.49
+  },
+  "errors_by_category": {
+    "code_switch": {
+      "errors_before": 9,
+      "errors_after": 9,
+      "change": 0
+    },
+    "deletion_run": {
+      "errors_before": 21,
+      "errors_after": 21,
+      "change": 0
+    },
+    "function_word": {
+      "errors_before": 186,
+      "errors_after": 186,
+      "change": 0
+    },
+    "hallucination": {
+      "errors_before": 9,
+      "errors_after": 9,
+      "change": 0
+    },
+    "numeric": {
+      "errors_before": 56,
+      "errors_after": 56,
+      "change": 0
+    },
+    "orthographic": {
+      "errors_before": 92,
+      "errors_after": 92,
+      "change": 0
+    },
+    "other": {
+      "errors_before": 968,
+      "errors_after": 968,
+      "change": 0
+    },
+    "rare_word": {
+      "errors_before": 373,
+      "errors_after": 373,
+      "change": 0
+    },
+    "truncation": {
+      "errors_before": 27,
+      "errors_after": 27,
+      "change": 0
+    }
+  }
+}

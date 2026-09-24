@@ -24,23 +24,23 @@ is worse than hoped.
 
 | Component | Status | Evidence |
 | --- | --- | --- |
-| ASR (whisper-large-v3-turbo + Hindi LoRA v2) | **measured candidate; unpublished artifact**: 23.83% WER, 8.43% CER, 694 ms p50, RTF 0.066 on 300 seeded FLEURS-hi test clips | `docs/EXPERIMENTS.md`; evidence not committed |
+| ASR (whisper-large-v3-turbo + Hindi LoRA v2) | **measured candidate; unpublished artifact**: guards-on 23.8265% WER / 8.4585% CER, 765.675 ms p50 on 300 seeded FLEURS-hi clips | `results/eval/v2-guards-on/`; adapter remains unavailable |
 | Explicit encoder/decoder runtime | validated token-identical to `generate()` on real Hindi audio | `results/gpu_validation/report.json` |
 | Streaming ASR + adaptive VAD | validated on 100 clips; streaming at offline parity | `results/streaming_eval/` |
 | Agent turn (LLM stream → sentences → TTS → playback, barge-in) | logic validated; one live turn measured at 719.8 ms response latency (first-token field is a prefill proxy) | `results/gpu_validation/report.json` |
 | Dialogue memory | unit-tested only | — |
-| ASR decode guards (no-speech, repetition loop) | **added, effect on WER never measured** | none — this is Phase 1 |
-| LLM choice | **open.** Qwen3-0.6B answers Hindi questions by restating them | none |
-| TTS backend (edge vs local MMS) | **open** | none |
-| Incremental finals, semantic endpointing | **open**, both default off | none |
-| CTranslate2 engine tier | validated on CPU only (fp32 token-identical, int8 2.7× faster) | commit `e52cc08` |
-| Compiled decode (static cache + CUDA graphs) | token-identical, but **0.9× — slower — on a T4** | `results/gpu_validation/report.json` |
-| Live turns (browser mic → agent → playable audio) | one turn done manually; **no distribution measured** | — |
+| ASR decode guards (no-speech, repetition loop) | defaults kept: WER unchanged; both guards fired on 0/300 clips | `results/eval/compare-guards.json` |
+| LLM choice | Qwen3-0.6B kept by fallback; no candidate met <800 ms first-sentence rule; human quality review pending | `results/llm_bakeoff/summary.json` |
+| TTS backend (edge vs local MMS) | MMS latency-leading; final choice pending human listening, so edge remains default | `results/tts_bakeoff/summary.json` |
+| Incremental finals, semantic endpointing | both remain off by fixed decision rules | `results/streaming_eval/summary.json` |
+| CTranslate2 engine tier | **adopt int8 tier**: 1.3145×, 1.5873% WER vs explicit | `results/gpu_validation-ct2/report.json` |
+| Compiled decode (static cache + CUDA graphs) | token-identical but **0.8526× — slower — on a T4**; off | `results/gpu_validation-ct2/report.json` |
+| Live turns (browser mic → agent → playable audio) | 12 persisted records: 4435.5 ms p50 / 5069.6 ms p90 response latency; configuration incomplete | `results/live/turns.jsonl` |
 | Device-level barge-in (`abort()` on a real output stream) | **not possible in Colab**; validated on a laptop only | commit `bf90aba` |
 | `data/hard_set/` | empty; the ledger requires per-category numbers for a result entry | — |
 | ASR v3 re-run | decided **not** to do; recorded with reasons | `docs/EXPERIMENTS.md` |
 
-563 automated tests pass on CPU; 8 more are GPU-gated and will run in Colab.
+592 automated tests pass on CPU; 8 more are GPU-gated and will run in Colab.
 
 ## What Colab can and cannot do
 

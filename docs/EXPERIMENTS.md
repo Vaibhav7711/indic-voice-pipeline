@@ -419,6 +419,67 @@ Reading it:
 `threshold_floor_dbfs=-70`, `min_silence_ms=600`. This is the energy-VAD
 baseline a neural VAD (Silero) must beat on the same benchmark in Stage 5.
 
+### T4 decision sweep (2026-09-24)
+
+Imported from the Colab evidence archive. The adapter remained the unavailable
+local path `/content/v2-final/best`; these measurements support serving
+decisions but do not make the v2 artifact reproducible. The guard, LLM, TTS,
+and streaming harnesses record commit `31a842f` with `git_dirty: true`; their
+LLM/TTS/streaming summaries also omit the GPU name. Evidence is committed
+under `results/eval/v2-guards-{on,off}/`, `results/llm_bakeoff/`,
+`results/tts_bakeoff/`, `results/streaming_eval/`, and
+`results/gpu_validation-ct2/`.
+
+**Decode guards.** Two like-for-like 300-clip FLEURS-hi test evaluations
+(`seed=0`, fp16, standard normalization) compared the defaults (no-speech
+threshold 0.6; repetition guard 3-gram × 4) with both guards disabled. WER
+was **23.8265%** in each run and CER **8.4585%** in each run. The enabled run
+recorded zero no-speech suppressions and zero repetition stops; p50 latency
+was 765.675 ms enabled versus 764.222 ms disabled. **Decision: keep the
+defaults.** WER is unchanged and guards fired on 0 clips.
+
+**LLM bake-off.** Twelve Hindi prompts, bf16:
+
+| Model | Devanagari ratio | Think leaks | First sentence p50 | Peak VRAM |
+| --- | ---: | ---: | ---: | ---: |
+| Qwen3-0.6B | 1.000 | 0 | 1744 ms | 1.17 GiB |
+| Qwen3-1.7B | 1.000 | 0 | 2534 ms | 3.27 GiB |
+| Qwen3-4B | 0.988 | 0 | 3553 ms | 7.61 GiB |
+
+No candidate meets the fixed <800 ms first-sentence threshold. **Decision:
+keep Qwen3-0.6B**, the prescribed fallback and fastest candidate; final Hindi
+answer quality remains pending human review of the saved outputs.
+
+**TTS bake-off.** MMS had a lower first-chunk p50 (**152.9 ms**) than edge
+(**883.1 ms**) on the five benchmark sentences; mean RTF was 0.0406 versus
+edge's 0.2130. The archive excludes WAVs, so acceptable Hindi audio has not
+been independently reviewed. **Decision: retain edge as the default pending
+human listening; MMS is the latency-leading candidate.**
+
+**Streaming decisions.** On 100 seeded FLEURS-hi test clips, `early` had
+12.3831% WER versus offline and 14 split clips at 652.8 ms mean
+endpoint-to-final. `early-incr` raised WER versus offline to 35.7684% with no
+endpoint-time reduction. `early-sem` reduced splits only to 13 and added 10.9
+ms mean endpoint-to-final time. **Decision: keep incremental finals and
+semantic endpointing off.** The first fails the <1.0 pp WER-cost rule; the
+second fails the single-digit-splits rule.
+
+**CTranslate2 and compiled decode.** The T4 int8-float16 CTranslate2 check
+passed with 1.5873% mean WER versus the explicit runner (within the 5%
+tolerance) and **1.3145×** speedup. **Decision: adopt CTranslate2 for the
+int8 serving tier**, with its stated WER tolerance. The compiled LLM path was
+token-identical but **0.8526×** eager speed, so **keep compiled decode off**
+under the >1.1× rule.
+
+**Live turns.** `results/live/turns.jsonl` contains 12 persisted streaming
+turn records. Response latency is **4435.5 ms p50**, **5069.6 ms p90**, and
+**4129.5 ms mean**. Mean ASR time is 342.2 ms; first-token 877.9 ms;
+first-token-to-first-unit 2446.0 ms; TTS synthesis 144.7 ms; and
+endpoint-to-final 660.8 ms. The main delay before first audio is generation
+until a speakable unit, not TTS synthesis. The live records do not record the
+selected LLM, TTS backend, GPU, or notebook commit, so this is a real
+distribution but not a configuration-comparison result.
+
 ### Measuring latency while training runs
 
 Don't. RTF, p50 and p90 measured on a GPU that is simultaneously training

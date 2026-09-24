@@ -1,0 +1,960 @@
+{
+  "context": {
+    "argv": [
+      "scripts/gpu_validation.py",
+      "--whisper-model",
+      "openai/whisper-large-v3-turbo",
+      "--adapter",
+      "/content/v2-final/best",
+      "--skip-unit-tests",
+      "--skip-network",
+      "--ct2-model",
+      "models/ct2/turbo-hindi-v2",
+      "--ct2-compute-type",
+      "int8_float16",
+      "--out-dir",
+      "results/gpu_validation-ct2"
+    ],
+    "gpu": "Tesla T4",
+    "vram_gib": 14.56,
+    "torch": "2.11.0+cu128",
+    "transformers": "5.16.1",
+    "git_commit": "31a842f9ab890e3fd747e3149d147de24b1f9be3",
+    "python": "3.13.15"
+  },
+  "checks": [
+    {
+      "name": "environment",
+      "status": "pass",
+      "detail": {
+        "gpu": "Tesla T4",
+        "vram_gib": 14.56,
+        "torch": "2.11.0+cu128",
+        "transformers": "5.16.1",
+        "git_commit": "31a842f9ab890e3fd747e3149d147de24b1f9be3",
+        "python": "3.13.15"
+      },
+      "error": null,
+      "seconds": 6.437922719000198
+    },
+    {
+      "name": "gpu_unit_tests",
+      "status": "skip",
+      "detail": {},
+      "error": "--skip-unit-tests",
+      "seconds": 1.5220002751448192e-06
+    },
+    {
+      "name": "fetch_fleurs_clips",
+      "status": "pass",
+      "detail": {
+        "hi_clips": 5,
+        "en_clips": 2,
+        "hi_seconds": 55.9
+      },
+      "error": null,
+      "seconds": 11.459498379000252
+    },
+    {
+      "name": "load_whisper_with_hub_adapter",
+      "status": "pass",
+      "detail": {
+        "model": "openai/whisper-large-v3-turbo",
+        "adapter_dir": "/content/v2-final/best"
+      },
+      "error": null,
+      "seconds": 10.69915754900012
+    },
+    {
+      "name": "served_model_matches_generate",
+      "status": "pass",
+      "detail": {
+        "clips": 3,
+        "worst_prefix_match": 1.0,
+        "all_exact": true,
+        "per_clip": [
+          {
+            "clip": "hi_in_test_7.wav",
+            "explicit_tokens": 85,
+            "generate_tokens": 85,
+            "prefix_match": 1.0,
+            "exact": true,
+            "explicit_text": "इसे केमिकल का पी एच कहा जाता है आप लाल गोभी के जूस को इस्तेमाल करके एक संकेतक बना सकते हैं",
+            "generate_text": "इसे केमिकल का पी एच कहा जाता है आप लाल गोभी के जूस को इस्तेमाल करके एक संकेतक बना सकते हैं"
+          },
+          {
+            "clip": "hi_in_test_42.wav",
+            "explicit_tokens": 112,
+            "generate_tokens": 112,
+            "prefix_match": 1.0,
+            "exact": true,
+            "explicit_text": "महिलाय या अनुशनशा की जाती है कि कोई भी महिलायात्री वास्तविक व्यवाहित स्थिति के बावजुद कहती है कि वह व्यवाहित है",
+            "generate_text": " महिलाय या अनुशनशा की जाती है कि कोई भी महिलायात्री वास्तविक व्यवाहित स्थिति के बावजुद कहती है कि वह व्यवाहित है"
+          },
+          {
+            "clip": "hi_in_test_123.wav",
+            "explicit_tokens": 177,
+            "generate_tokens": 177,
+            "prefix_match": 1.0,
+            "exact": true,
+            "explicit_text": "सड़कों पर ज़्यादा धुरुकटना की वज़ा बहुत ज़्यादाकार ऑनर्शिप है जिससे शरीर में हुई टूटफुट को सुधारने के लिए हेल्थकेर में नई तकनीकों के अविश्कार को बढ़ावा मिला है",
+            "generate_text": " सड़कों पर ज़्यादा धुरुकटना की वज़ा बहुत ज़्यादाकार ऑनर्शिप है जिससे शरीर में हुई टूटफुट को सुधारने के लिए हेल्थकेर में नई तकनीकों के अविश्कार को बढ़ावा मिला है"
+          }
+        ]
+      },
+      "error": null,
+      "seconds": 8.007070235000356
+    },
+    {
+      "name": "asr_quality_on_clips",
+      "status": "pass",
+      "detail": {
+        "mean_wer": 22.136321742773355,
+        "mean_rtf": 0.0700881935120399,
+        "rows": [
+          {
+            "clip": "hi_in_test_7.wav",
+            "seconds": 8.22,
+            "wer": 15.0,
+            "rtf": 0.07210174270072991,
+            "total_ms": 592.676325,
+            "hypothesis": "इसे केमिकल का पी एच कहा जाता है आप लाल गोभी के जूस को इस्तेमाल करके एक संकेतक बना सकते हैं",
+            "reference": "इसे केमिकल का ph कहा जाता है आप लाल गोभी के जूस का इस्तेमाल करके एक संकेतक बना सकते हैं"
+          },
+          {
+            "clip": "hi_in_test_42.wav",
+            "seconds": 8.52,
+            "wer": 36.36363636363637,
+            "rtf": 0.0840279045774648,
+            "total_ms": 715.917747,
+            "hypothesis": "महिलाय या अनुशनशा की जाती है कि कोई भी महिलायात्री वास्तविक व्यवाहित स्थिति के बावजुद कहती है कि वह व्यवाहित है",
+            "reference": "महिलाएं यह अनुशंसा की जाती है कि कोई भी महिला यात्री वास्तविक वैवाहिक स्थिति के बावजूद कहती है कि वह विवाहित है"
+          },
+          {
+            "clip": "hi_in_test_123.wav",
+            "seconds": 15.54,
+            "wer": 29.03225806451613,
+            "rtf": 0.0650600245817246,
+            "total_ms": 1011.032782,
+            "hypothesis": "सड़कों पर ज़्यादा धुरुकटना की वज़ा बहुत ज़्यादाकार ऑनर्शिप है जिससे शरीर में हुई टूटफुट को सुधारने के लिए हेल्थकेर में नई तकनीकों के अविश्कार को बढ़ावा मिला है",
+            "reference": "सड़कों पर ज़्यादा दुर्घटना की वजह बहुत ज़्यादा कार ओनरशिप है जिससे शरीर में हुई टूट-फूट को सुधारने के लिए हेल्थकेयर में नई तकनीकों के आविष्कार को बढ़ावा मिला है"
+          },
+          {
+            "clip": "hi_in_test_256.wav",
+            "seconds": 10.2,
+            "wer": 14.285714285714285,
+            "rtf": 0.08074349450980393,
+            "total_ms": 823.583644,
+            "hypothesis": "परिसर के किनारे ज़्यादातर इमारतें फिर से बनाई गई हैं ताकि परिटों को बेहतर धंक से पता चले कि वे मूल रूप में कैसी दिखाई देती थी",
+            "reference": "परिसर के किनारे ज़्यादातर इमारतें फिर से बनाई गई हैं ताकि पर्यटकों को बेहतर ढंग से पता चल सके कि वे मूल रूप में कैसी दिखाई देती थी"
+          },
+          {
+            "clip": "hi_in_test_311.wav",
+            "seconds": 13.44,
+            "wer": 16.0,
+            "rtf": 0.04850780119047619,
+            "total_ms": 651.944848,
+            "hypothesis": "सावधान रहे कि कपड़े को बहुत गर्म न होने दे जो सिकूरने का कारण बन सकता है या बहुत गर्म होने पर जल सकता है",
+            "reference": "सावधान रहें कि कपड़े को बहुत गर्म न होने दें जो सिकुड़न का कारण बन सकता है या बहुत गरम होने पर जल सकता है।"
+          }
+        ]
+      },
+      "error": null,
+      "seconds": 3.814143587000217
+    },
+    {
+      "name": "language_detection_base_model",
+      "status": "warn",
+      "detail": {
+        "clips": 4,
+        "mean_detection_ms": 11.523790499999999,
+        "min_probability": 0.8951017260551453,
+        "wrong": [
+          "hi_in_test_7.wav→ur"
+        ],
+        "rows": [
+          {
+            "clip": "hi_in_test_7.wav",
+            "expected": "hi",
+            "detected": "ur",
+            "probability": 0.8951017260551453,
+            "detection_ms": 24.557443,
+            "text": "اسے کیمیکل کا پی ایچ کہا جاتا ہے آپ لال گوبی کے جوس کو استعمال کر کے ایک سنکیت تک بنا سکتے ہیں"
+          },
+          {
+            "clip": "hi_in_test_42.wav",
+            "expected": "hi",
+            "detected": "hi",
+            "probability": 0.9518406987190247,
+            "detection_ms": 7.282353,
+            "text": "महिला या अनुशन्शा की जाती है कि कोई भी महिला या त्री वास्तविक विवाइत स्थिति के बावजुद कहती है कि वह विवाइत है।"
+          },
+          {
+            "clip": "en_us_test_5.wav",
+            "expected": "en",
+            "detected": "en",
+            "probability": 0.9997319579124451,
+            "detection_ms": 7.097722,
+            "text": "The hospital has followed protocol for infection control, including separating the patient from others to prevent possible infection of others."
+          },
+          {
+            "clip": "en_us_test_77.wav",
+            "expected": "en",
+            "detected": "en",
+            "probability": 0.9998487234115601,
+            "detection_ms": 7.157644,
+            "text": "This is called a chemical's pH. You can make an indicator using red cabbage juice."
+          }
+        ]
+      },
+      "error": "base model flips hi<->ur on ['hi_in_test_7.wav→ur'] (expected; the adapter is checked separately)",
+      "seconds": 5.14445074500054
+    },
+    {
+      "name": "language_detection_adapter",
+      "status": "pass",
+      "detail": {
+        "unrestricted_wrong": 0,
+        "restricted_wrong": 0,
+        "unrestricted": {
+          "clips": 4,
+          "mean_detection_ms": 8.924704,
+          "min_probability": 0.21809116005897522,
+          "wrong": [],
+          "rows": [
+            {
+              "clip": "hi_in_test_7.wav",
+              "expected": "hi",
+              "detected": "hi",
+              "probability": 0.3323517441749573,
+              "detection_ms": 9.813992,
+              "text": "इसे केमिकल का पी एच कहा जाता है आप लाल गोभी के जूस को इस्तेमाल करके एक संकेतक बना सकते हैं"
+            },
+            {
+              "clip": "hi_in_test_42.wav",
+              "expected": "hi",
+              "detected": "hi",
+              "probability": 0.21809116005897522,
+              "detection_ms": 7.59214,
+              "text": "महिलाय या अनुशनशा की जाती है कि कोई भी महिलायात्री वास्तविक व्यवाहित स्थिति के बावजुद कहती है कि वह व्यवाहित है"
+            },
+            {
+              "clip": "en_us_test_5.wav",
+              "expected": "en",
+              "detected": "en",
+              "probability": 0.9996954202651978,
+              "detection_ms": 7.728842,
+              "text": "The hospital has followed protocol for infection control, including separating the patient from others to prevent possible infection of others."
+            },
+            {
+              "clip": "en_us_test_77.wav",
+              "expected": "en",
+              "detected": "en",
+              "probability": 0.999779999256134,
+              "detection_ms": 10.563842,
+              "text": "This is called a chemical's pH. You can make an indicator using red cabbage juice."
+            }
+          ]
+        },
+        "restricted_hi_en_te": {
+          "clips": 4,
+          "mean_detection_ms": 7.630082,
+          "min_probability": 0.7652637958526611,
+          "wrong": [],
+          "rows": [
+            {
+              "clip": "hi_in_test_7.wav",
+              "expected": "hi",
+              "detected": "hi",
+              "probability": 0.8311774730682373,
+              "detection_ms": 7.555944,
+              "text": "इसे केमिकल का पी एच कहा जाता है आप लाल गोभी के जूस को इस्तेमाल करके एक संकेतक बना सकते हैं"
+            },
+            {
+              "clip": "hi_in_test_42.wav",
+              "expected": "hi",
+              "detected": "hi",
+              "probability": 0.7652637958526611,
+              "detection_ms": 7.77601,
+              "text": "महिलाय या अनुशनशा की जाती है कि कोई भी महिलायात्री वास्तविक व्यवाहित स्थिति के बावजुद कहती है कि वह व्यवाहित है"
+            },
+            {
+              "clip": "en_us_test_5.wav",
+              "expected": "en",
+              "detected": "en",
+              "probability": 1.0,
+              "detection_ms": 7.52825,
+              "text": "The hospital has followed protocol for infection control, including separating the patient from others to prevent possible infection of others."
+            },
+            {
+              "clip": "en_us_test_77.wav",
+              "expected": "en",
+              "detected": "en",
+              "probability": 1.0,
+              "detection_ms": 7.660124,
+              "text": "This is called a chemical's pH. You can make an indicator using red cabbage juice."
+            }
+          ]
+        }
+      },
+      "error": null,
+      "seconds": 4.521310836999874
+    },
+    {
+      "name": "long_form_chunking",
+      "status": "pass",
+      "detail": {
+        "audio_seconds": 58.4,
+        "chunks": 3,
+        "wer_vs_concatenated_refs": 29.365079365079367,
+        "rtf": 0.06487266051009928,
+        "text": "इसे केमिकल का पी-एच कहा जाता है आप लाल गोभी के जूस को इस्तेमाल करके एक संकेतक बना सकते हैं महिलाय या अनुशनशा की जाती है कि कोई भी महिलायात्री वास्तविक विवाहित स्थिति के बावजुत कहती है कि वह विवाहित है सड़कों पर ज्यादा धुरुकटना की वज़ा बहुत ज्यादाकार ऑनर्शिप है जिससे शरीर में वजह बहुत ज्यादाकार ऑनर्शिप है जिससे शरीर में हुई टूटफुट को सुधारने के लिए हेल्थकेर में नई तकनीकों के अविश्कार को बढ़ावा मिला है परिसर के किनारे ज्यादातर इमारतें फिर से बनाई गई हैं ताकि परिटों को बहतर ध्रंक से पता चले कि वे मूल रूप में कैसी दिखाई देती थी सावधान रहे कि कपड़े को बहुत गर्म न होने दे जो सिकूरने का कारण बन सकता है या बहुत गर्म होने पर जल सकता है"
+      },
+      "error": null,
+      "seconds": 3.8004937079995216
+    },
+    {
+      "name": "streaming_session",
+      "status": "pass",
+      "detail": {
+        "utterances_expected": 2,
+        "finals": 2,
+        "partials": 11,
+        "wer_vs_refs": 23.809523809523807,
+        "wer_vs_offline": 7.142857142857142,
+        "online_vs_offline_vad": 1.0,
+        "offline_vad_segments": 2,
+        "min_clip_coverage": 0.908,
+        "final_asr_ms_mean": 758.1851675,
+        "asr_after_endpoint_ms_mean": 0.0,
+        "finals_from_candidate": 2,
+        "candidates": 2,
+        "endpoint_reasons": [
+          "silence",
+          "silence"
+        ],
+        "finals_detail": [
+          {
+            "start": 0.26,
+            "seconds": 7.46,
+            "reason": "silence",
+            "from_candidate": true,
+            "asr_ms_after_endpoint": 0.0,
+            "text": "इसे केमिकल का पी एच कहा जाता है आप लाल गोभी के जूस को इस्तेमाल करके एक संकेतक बना सकते हैं"
+          },
+          {
+            "start": 8.91,
+            "seconds": 8.31,
+            "reason": "silence",
+            "from_candidate": true,
+            "asr_ms_after_endpoint": 0.0,
+            "text": "महिलाय या अनुशरानशा की जाती है कि कोई भी महिलायात्री वास्तविक विवाहित स्थिति के बावजुद कहती है कि वह विवाहित है"
+          }
+        ],
+        "offline_vad_detail": [
+          {
+            "start": 0.26,
+            "end": 7.72
+          },
+          {
+            "start": 8.91,
+            "end": 16.87
+          }
+        ],
+        "coverage": [
+          {
+            "clip": "hi_in_test_7.wav",
+            "covered_fraction": 0.908
+          },
+          {
+            "clip": "hi_in_test_42.wav",
+            "covered_fraction": 0.939
+          }
+        ],
+        "offline_hypotheses": [
+          "इसे केमिकल का पी एच कहा जाता है आप लाल गोभी के जूस को इस्तेमाल करके एक संकेतक बना सकते हैं",
+          "महिलाय या अनुशनशा की जाती है कि कोई भी महिलायात्री वास्तविक व्यवाहित स्थिति के बावजुद कहती है कि वह व्यवाहित है"
+        ],
+        "updates": [
+          {
+            "kind": "state",
+            "sequence": 1,
+            "session_id": "f6fbbadeef86",
+            "state": "speaking",
+            "utterance_index": 0,
+            "text": "",
+            "is_final": false,
+            "endpoint_reason": null,
+            "audio_seconds": 0.0,
+            "stream_seconds": 0.9,
+            "utterance_start_seconds": 0.26,
+            "asr_ms": 0.0,
+            "real_time_factor": 0.0,
+            "long_form": false,
+            "partial_is_tail": false,
+            "from_candidate": false,
+            "asr_ms_after_endpoint": 0.0,
+            "decoded_seconds": 0.0,
+            "reused_partial": false,
+            "no_speech": false,
+            "degenerate": false
+          },
+          {
+            "kind": "partial",
+            "sequence": 2,
+            "session_id": "f6fbbadeef86",
+            "state": "speaking",
+            "utterance_index": 0,
+            "text": "इसे केमिकल का",
+            "is_final": false,
+            "endpoint_reason": null,
+            "audio_seconds": 1.84,
+            "stream_seconds": 2.1,
+            "utterance_start_seconds": 0.26,
+            "asr_ms": 256.342,
+            "real_time_factor": 0.1393,
+            "long_form": false,
+            "partial_is_tail": false,
+            "from_candidate": false,
+            "asr_ms_after_endpoint": 0.0,
+            "decoded_seconds": 0.0,
+            "reused_partial": false,
+            "no_speech": false,
+            "degenerate": false
+          },
+          {
+            "kind": "partial",
+            "sequence": 3,
+            "session_id": "f6fbbadeef86",
+            "state": "speaking",
+            "utterance_index": 0,
+            "text": "इसे केमिकल का पी एच कहा जाता है",
+            "is_final": false,
+            "endpoint_reason": null,
+            "audio_seconds": 3.04,
+            "stream_seconds": 3.3,
+            "utterance_start_seconds": 0.26,
+            "asr_ms": 346.684,
+            "real_time_factor": 0.114,
+            "long_form": false,
+            "partial_is_tail": false,
+            "from_candidate": false,
+            "asr_ms_after_endpoint": 0.0,
+            "decoded_seconds": 0.0,
+            "reused_partial": false,
+            "no_speech": false,
+            "degenerate": false
+          },
+          {
+            "kind": "partial",
+            "sequence": 4,
+            "session_id": "f6fbbadeef86",
+            "state": "speaking",
+            "utterance_index": 0,
+            "text": "इसे केमिकल का पी एच कहा जाता है आप लाल गोभी के",
+            "is_final": false,
+            "endpoint_reason": null,
+            "audio_seconds": 4.24,
+            "stream_seconds": 4.5,
+            "utterance_start_seconds": 0.26,
+            "asr_ms": 431.433,
+            "real_time_factor": 0.1018,
+            "long_form": false,
+            "partial_is_tail": false,
+            "from_candidate": false,
+            "asr_ms_after_endpoint": 0.0,
+            "decoded_seconds": 0.0,
+            "reused_partial": false,
+            "no_speech": false,
+            "degenerate": false
+          },
+          {
+            "kind": "partial",
+            "sequence": 5,
+            "session_id": "f6fbbadeef86",
+            "state": "speaking",
+            "utterance_index": 0,
+            "text": "इसे केमिकल का पी एच कहा जाता है आप लाल गोभी के जूस को इस्तेमाल करके",
+            "is_final": false,
+            "endpoint_reason": null,
+            "audio_seconds": 5.44,
+            "stream_seconds": 5.7,
+            "utterance_start_seconds": 0.26,
+            "asr_ms": 550.212,
+            "real_time_factor": 0.1011,
+            "long_form": false,
+            "partial_is_tail": false,
+            "from_candidate": false,
+            "asr_ms_after_endpoint": 0.0,
+            "decoded_seconds": 0.0,
+            "reused_partial": false,
+            "no_speech": false,
+            "degenerate": false
+          },
+          {
+            "kind": "partial",
+            "sequence": 6,
+            "session_id": "f6fbbadeef86",
+            "state": "speaking",
+            "utterance_index": 0,
+            "text": "इसे केमिकल का पी एच कहा जाता है आप लाल गोभी के जूस को इस्तेमाल करके एक संकेतक बना सकें",
+            "is_final": false,
+            "endpoint_reason": null,
+            "audio_seconds": 6.64,
+            "stream_seconds": 6.9,
+            "utterance_start_seconds": 0.26,
+            "asr_ms": 592.948,
+            "real_time_factor": 0.0893,
+            "long_form": false,
+            "partial_is_tail": false,
+            "from_candidate": false,
+            "asr_ms_after_endpoint": 0.0,
+            "decoded_seconds": 0.0,
+            "reused_partial": false,
+            "no_speech": false,
+            "degenerate": false
+          },
+          {
+            "kind": "candidate",
+            "sequence": 7,
+            "session_id": "f6fbbadeef86",
+            "state": "speaking",
+            "utterance_index": 0,
+            "text": "इसे केमिकल का पी एच कहा जाता है आप लाल गोभी के जूस को इस्तेमाल करके एक संकेतक बना सकते हैं",
+            "is_final": false,
+            "endpoint_reason": null,
+            "audio_seconds": 7.46,
+            "stream_seconds": 7.8,
+            "utterance_start_seconds": 0.26,
+            "asr_ms": 622.863,
+            "real_time_factor": 0.0835,
+            "long_form": false,
+            "partial_is_tail": false,
+            "from_candidate": false,
+            "asr_ms_after_endpoint": 0.0,
+            "decoded_seconds": 7.46,
+            "reused_partial": false,
+            "no_speech": false,
+            "degenerate": false
+          },
+          {
+            "kind": "final",
+            "sequence": 8,
+            "session_id": "f6fbbadeef86",
+            "state": "idle",
+            "utterance_index": 0,
+            "text": "इसे केमिकल का पी एच कहा जाता है आप लाल गोभी के जूस को इस्तेमाल करके एक संकेतक बना सकते हैं",
+            "is_final": true,
+            "endpoint_reason": "silence",
+            "audio_seconds": 7.46,
+            "stream_seconds": 8.1,
+            "utterance_start_seconds": 0.26,
+            "asr_ms": 622.863,
+            "real_time_factor": 0.0835,
+            "long_form": false,
+            "partial_is_tail": false,
+            "from_candidate": true,
+            "asr_ms_after_endpoint": 0.0,
+            "decoded_seconds": 7.46,
+            "reused_partial": false,
+            "no_speech": false,
+            "degenerate": false
+          },
+          {
+            "kind": "state",
+            "sequence": 9,
+            "session_id": "f6fbbadeef86",
+            "state": "idle",
+            "utterance_index": 1,
+            "text": "",
+            "is_final": false,
+            "endpoint_reason": null,
+            "audio_seconds": 0.0,
+            "stream_seconds": 8.1,
+            "utterance_start_seconds": 0.0,
+            "asr_ms": 0.0,
+            "real_time_factor": 0.0,
+            "long_form": false,
+            "partial_is_tail": false,
+            "from_candidate": false,
+            "asr_ms_after_endpoint": 0.0,
+            "decoded_seconds": 0.0,
+            "reused_partial": false,
+            "no_speech": false,
+            "degenerate": false
+          },
+          {
+            "kind": "state",
+            "sequence": 10,
+            "session_id": "f6fbbadeef86",
+            "state": "speaking",
+            "utterance_index": 1,
+            "text": "",
+            "is_final": false,
+            "endpoint_reason": null,
+            "audio_seconds": 0.0,
+            "stream_seconds": 9.5,
+            "utterance_start_seconds": 8.91,
+            "asr_ms": 0.0,
+            "real_time_factor": 0.0,
+            "long_form": false,
+            "partial_is_tail": false,
+            "from_candidate": false,
+            "asr_ms_after_endpoint": 0.0,
+            "decoded_seconds": 0.0,
+            "reused_partial": false,
+            "no_speech": false,
+            "degenerate": false
+          },
+          {
+            "kind": "partial",
+            "sequence": 11,
+            "session_id": "f6fbbadeef86",
+            "state": "speaking",
+            "utterance_index": 1,
+            "text": "महिलाए यक्षा",
+            "is_final": false,
+            "endpoint_reason": null,
+            "audio_seconds": 1.79,
+            "stream_seconds": 10.7,
+            "utterance_start_seconds": 8.91,
+            "asr_ms": 273.868,
+            "real_time_factor": 0.153,
+            "long_form": false,
+            "partial_is_tail": false,
+            "from_candidate": false,
+            "asr_ms_after_endpoint": 0.0,
+            "decoded_seconds": 0.0,
+            "reused_partial": false,
+            "no_speech": false,
+            "degenerate": false
+          },
+          {
+            "kind": "partial",
+            "sequence": 12,
+            "session_id": "f6fbbadeef86",
+            "state": "speaking",
+            "utterance_index": 1,
+            "text": "महिलाए या अनुश्य अन्शा कीजिए",
+            "is_final": false,
+            "endpoint_reason": null,
+            "audio_seconds": 2.99,
+            "stream_seconds": 11.9,
+            "utterance_start_seconds": 8.91,
+            "asr_ms": 400.937,
+            "real_time_factor": 0.1341,
+            "long_form": false,
+            "partial_is_tail": false,
+            "from_candidate": false,
+            "asr_ms_after_endpoint": 0.0,
+            "decoded_seconds": 0.0,
+            "reused_partial": false,
+            "no_speech": false,
+            "degenerate": false
+          },
+          {
+            "kind": "partial",
+            "sequence": 13,
+            "session_id": "f6fbbadeef86",
+            "state": "speaking",
+            "utterance_index": 1,
+            "text": "महिलाए या अनुशराणशा की जाती है कि कोई भी महिलाए",
+            "is_final": false,
+            "endpoint_reason": null,
+            "audio_seconds": 4.19,
+            "stream_seconds": 13.1,
+            "utterance_start_seconds": 8.91,
+            "asr_ms": 433.281,
+            "real_time_factor": 0.1034,
+            "long_form": false,
+            "partial_is_tail": false,
+            "from_candidate": false,
+            "asr_ms_after_endpoint": 0.0,
+            "decoded_seconds": 0.0,
+            "reused_partial": false,
+            "no_speech": false,
+            "degenerate": false
+          },
+          {
+            "kind": "partial",
+            "sequence": 14,
+            "session_id": "f6fbbadeef86",
+            "state": "speaking",
+            "utterance_index": 1,
+            "text": "महिलाय या अनुशरानशा की जाती है कि कोई भी महिलाय यात्री वास्तविक व्यवर्ण",
+            "is_final": false,
+            "endpoint_reason": null,
+            "audio_seconds": 5.39,
+            "stream_seconds": 14.3,
+            "utterance_start_seconds": 8.91,
+            "asr_ms": 694.751,
+            "real_time_factor": 0.1289,
+            "long_form": false,
+            "partial_is_tail": false,
+            "from_candidate": false,
+            "asr_ms_after_endpoint": 0.0,
+            "decoded_seconds": 0.0,
+            "reused_partial": false,
+            "no_speech": false,
+            "degenerate": false
+          },
+          {
+            "kind": "partial",
+            "sequence": 15,
+            "session_id": "f6fbbadeef86",
+            "state": "speaking",
+            "utterance_index": 1,
+            "text": "महिलाय या अनुशरानशा की जाती है कि कोई भी महिलाय यात्री वास्तविक व्यवाय स्थिति के बावजुद के",
+            "is_final": false,
+            "endpoint_reason": null,
+            "audio_seconds": 6.59,
+            "stream_seconds": 15.5,
+            "utterance_start_seconds": 8.91,
+            "asr_ms": 744.442,
+            "real_time_factor": 0.113,
+            "long_form": false,
+            "partial_is_tail": false,
+            "from_candidate": false,
+            "asr_ms_after_endpoint": 0.0,
+            "decoded_seconds": 0.0,
+            "reused_partial": false,
+            "no_speech": false,
+            "degenerate": false
+          },
+          {
+            "kind": "partial",
+            "sequence": 16,
+            "session_id": "f6fbbadeef86",
+            "state": "speaking",
+            "utterance_index": 1,
+            "text": "महिलाय या अनुशरानशा की जाती है कि कोई भी महिलायात्री वास्तविक व्यवाई श्थिति के बावजुद कहती है कि वह व्यवाईत है",
+            "is_final": false,
+            "endpoint_reason": null,
+            "audio_seconds": 7.79,
+            "stream_seconds": 16.7,
+            "utterance_start_seconds": 8.91,
+            "asr_ms": 907.307,
+            "real_time_factor": 0.1165,
+            "long_form": false,
+            "partial_is_tail": false,
+            "from_candidate": false,
+            "asr_ms_after_endpoint": 0.0,
+            "decoded_seconds": 0.0,
+            "reused_partial": false,
+            "no_speech": false,
+            "degenerate": false
+          },
+          {
+            "kind": "candidate",
+            "sequence": 17,
+            "session_id": "f6fbbadeef86",
+            "state": "speaking",
+            "utterance_index": 1,
+            "text": "महिलाय या अनुशरानशा की जाती है कि कोई भी महिलायात्री वास्तविक विवाहित स्थिति के बावजुद कहती है कि वह विवाहित है",
+            "is_final": false,
+            "endpoint_reason": null,
+            "audio_seconds": 8.31,
+            "stream_seconds": 17.3,
+            "utterance_start_seconds": 8.91,
+            "asr_ms": 893.507,
+            "real_time_factor": 0.1075,
+            "long_form": false,
+            "partial_is_tail": false,
+            "from_candidate": false,
+            "asr_ms_after_endpoint": 0.0,
+            "decoded_seconds": 8.31,
+            "reused_partial": false,
+            "no_speech": false,
+            "degenerate": false
+          },
+          {
+            "kind": "final",
+            "sequence": 18,
+            "session_id": "f6fbbadeef86",
+            "state": "idle",
+            "utterance_index": 1,
+            "text": "महिलाय या अनुशरानशा की जाती है कि कोई भी महिलायात्री वास्तविक विवाहित स्थिति के बावजुद कहती है कि वह विवाहित है",
+            "is_final": true,
+            "endpoint_reason": "silence",
+            "audio_seconds": 8.31,
+            "stream_seconds": 17.6,
+            "utterance_start_seconds": 8.91,
+            "asr_ms": 893.507,
+            "real_time_factor": 0.1075,
+            "long_form": false,
+            "partial_is_tail": false,
+            "from_candidate": true,
+            "asr_ms_after_endpoint": 0.0,
+            "decoded_seconds": 8.31,
+            "reused_partial": false,
+            "no_speech": false,
+            "degenerate": false
+          },
+          {
+            "kind": "state",
+            "sequence": 19,
+            "session_id": "f6fbbadeef86",
+            "state": "idle",
+            "utterance_index": 2,
+            "text": "",
+            "is_final": false,
+            "endpoint_reason": null,
+            "audio_seconds": 0.0,
+            "stream_seconds": 17.6,
+            "utterance_start_seconds": 0.0,
+            "asr_ms": 0.0,
+            "real_time_factor": 0.0,
+            "long_form": false,
+            "partial_is_tail": false,
+            "from_candidate": false,
+            "asr_ms_after_endpoint": 0.0,
+            "decoded_seconds": 0.0,
+            "reused_partial": false,
+            "no_speech": false,
+            "degenerate": false
+          },
+          {
+            "kind": "state",
+            "sequence": 20,
+            "session_id": "f6fbbadeef86",
+            "state": "closed",
+            "utterance_index": 2,
+            "text": "",
+            "is_final": false,
+            "endpoint_reason": null,
+            "audio_seconds": 0.0,
+            "stream_seconds": 18.74,
+            "utterance_start_seconds": 0.0,
+            "asr_ms": 0.0,
+            "real_time_factor": 0.0,
+            "long_form": false,
+            "partial_is_tail": false,
+            "from_candidate": false,
+            "asr_ms_after_endpoint": 0.0,
+            "decoded_seconds": 0.0,
+            "reused_partial": false,
+            "no_speech": false,
+            "degenerate": false
+          }
+        ]
+      },
+      "error": null,
+      "seconds": 8.578480533000402
+    },
+    {
+      "name": "ct2_matches_explicit",
+      "status": "pass",
+      "detail": {
+        "clips": 3,
+        "tokens_equal": 1,
+        "mean_wer_vs_explicit": 1.5873015873015872,
+        "speedup": 1.3145386763855378,
+        "compute_type": "int8_float16",
+        "rows": [
+          {
+            "clip": "hi_in_test_7.wav",
+            "tokens_equal": false,
+            "wer_ct2_vs_explicit": 0.0,
+            "explicit_ms": 636.573429,
+            "ct2_ms": 628.157134,
+            "explicit_text": "इसे केमिकल का पी एच कहा जाता है आप लाल गोभी के जूस को इस्तेमाल करके एक संकेतक बना सकते हैं",
+            "ct2_text": "इसे केमिकल का पी-एच कहा जाता है आप लाल गोभी के जूस को इस्तेमाल करके एक संकेतक बना सकते हैं"
+          },
+          {
+            "clip": "hi_in_test_42.wav",
+            "tokens_equal": false,
+            "wer_ct2_vs_explicit": 4.761904761904762,
+            "explicit_ms": 746.144926,
+            "ct2_ms": 534.433037,
+            "explicit_text": "महिलाय या अनुशनशा की जाती है कि कोई भी महिलायात्री वास्तविक व्यवाहित स्थिति के बावजुद कहती है कि वह व्यवाहित है",
+            "ct2_text": "महिलाय या अनुशनशा की जाती है कि कोई भी महिलायात्री वास्तविक व्यवाहित स्थिति के बावजुत कहती है कि वह व्यवाहित है"
+          },
+          {
+            "clip": "hi_in_test_123.wav",
+            "tokens_equal": true,
+            "wer_ct2_vs_explicit": 0.0,
+            "explicit_ms": 1034.246171,
+            "ct2_ms": 674.182418,
+            "explicit_text": "सड़कों पर ज़्यादा धुरुकटना की वज़ा बहुत ज़्यादाकार ऑनर्शिप है जिससे शरीर में हुई टूटफुट को सुधारने के लिए हेल्थकेर में नई तकनीकों के अविश्कार को बढ़ावा मिला है",
+            "ct2_text": "सड़कों पर ज़्यादा धुरुकटना की वज़ा बहुत ज़्यादाकार ऑनर्शिप है जिससे शरीर में हुई टूटफुट को सुधारने के लिए हेल्थकेर में नई तकनीकों के अविश्कार को बढ़ावा मिला है"
+          }
+        ]
+      },
+      "error": null,
+      "seconds": 5.916020065000339
+    },
+    {
+      "name": "load_llm",
+      "status": "pass",
+      "detail": {
+        "llm": "Qwen/Qwen3-0.6B",
+        "strategy": "concurrent"
+      },
+      "error": null,
+      "seconds": 8.077067256000191
+    },
+    {
+      "name": "llm_prompt_and_decoding",
+      "status": "pass",
+      "detail": {
+        "prompt_has_empty_think": true,
+        "generated_tokens": 58,
+        "prefill_ms": 367.6176452636719,
+        "mean_decode_ms": 43.523495312394765,
+        "response": "इसे अमार गोभी के जूस के इस्तेमाल के साथ एक संकेतक बना सकते हैं।"
+      },
+      "error": null,
+      "seconds": 2.9926262150002003
+    },
+    {
+      "name": "llm_compiled_matches_eager",
+      "status": "pass",
+      "detail": {
+        "tokens_match": true,
+        "eager_ms_per_token": 42.36428885624326,
+        "compiled_ms_per_token": 49.688702550427664,
+        "speedup": 0.8525939837782832,
+        "eager_prefill_ms": 119.06460571289062,
+        "compiled_prefill_ms": 106.90284729003906,
+        "generated_tokens": 58,
+        "eager_text": "इसे अमार गोभी के जूस के इस्तेमाल के साथ एक संकेतक बना सकते हैं।",
+        "compiled_text": "इसे अमार गोभी के जूस के इस्तेमाल के साथ एक संकेतक बना सकते हैं।"
+      },
+      "error": null,
+      "seconds": 174.02233122100006
+    },
+    {
+      "name": "pipeline_waterfall",
+      "status": "pass",
+      "detail": {
+        "strategy": "concurrent",
+        "mel_ms": 28.174279333333335,
+        "encoder_ms": 167.1261444091797,
+        "asr_decode_ms": 419.10632530848187,
+        "llm_prefill_ms": 112.05158233642578,
+        "llm_decode_ms": 2156.6337547302246,
+        "total_ms": 2953.6683453333335,
+        "audio_to_first_llm_token_ms": 764.8911010030924,
+        "peak_vram_gib": 2.8068490028381348,
+        "transcript": "इसे केमिकल का पी एच कहा जाता है आप लाल गोभी के जूस को इस्तेमाल करके एक संकेतक बना सकते हैं",
+        "answer": "इसे अमार गोभी के जूस में लाख विशेषज्ञ के द्वारा उप"
+      },
+      "error": null,
+      "seconds": 12.220105798999612
+    },
+    {
+      "name": "voice_turn_real_tts",
+      "status": "skip",
+      "detail": {},
+      "error": "--skip-network",
+      "seconds": 1.2620002962648869e-06
+    },
+    {
+      "name": "barge_in_real_tts",
+      "status": "skip",
+      "detail": {},
+      "error": "--skip-network",
+      "seconds": 9.640007192501798e-07
+    }
+  ]
+}

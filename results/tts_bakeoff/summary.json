@@ -1,0 +1,136 @@
+{
+  "backends": {
+    "edge": {
+      "backend": "edge",
+      "format": {
+        "codec": "mp3",
+        "sample_rate": 24000,
+        "channels": 1
+      },
+      "streaming": true,
+      "warm_up_ms": null,
+      "first_chunk_ms_p50": 883.1,
+      "total_ms_mean": 1253.94,
+      "rtf_mean": 0.213,
+      "rows": [
+        {
+          "sentence": "नमस्ते, मैं आपकी क्या मदद कर सकती हूँ?",
+          "first_chunk_ms": 883.1,
+          "total_ms": 1123.9,
+          "audio_seconds": 4.44,
+          "rtf": 0.253,
+          "wav": "results/tts_bakeoff/edge_0.wav"
+        },
+        {
+          "sentence": "दिल्ली से मुंबई जाने का सबसे तेज़ तरीका हवाई जहाज़ है, जिसमें लगभग दो घंटे लगते हैं।",
+          "first_chunk_ms": 1428.6,
+          "total_ms": 1945.8,
+          "audio_seconds": 7.66,
+          "rtf": 0.254,
+          "wav": "results/tts_bakeoff/edge_1.wav"
+        },
+        {
+          "sentence": "आपका laptop slow होने की सबसे आम वजह पुराना software और भरी हुई disk होती है।",
+          "first_chunk_ms": 816.1,
+          "total_ms": 1104.1,
+          "audio_seconds": 7.18,
+          "rtf": 0.154,
+          "wav": "results/tts_bakeoff/edge_2.wav"
+        },
+        {
+          "sentence": "एक किलो चावल में लगभग तीन हज़ार छह सौ कैलोरी होती है।",
+          "first_chunk_ms": 958.7,
+          "total_ms": 1263.6,
+          "audio_seconds": 5.35,
+          "rtf": 0.236,
+          "wav": "results/tts_bakeoff/edge_3.wav"
+        },
+        {
+          "sentence": "ठीक है, मैंने कल सुबह छह बजे का alarm लगा दिया है।",
+          "first_chunk_ms": 612.2,
+          "total_ms": 832.3,
+          "audio_seconds": 4.94,
+          "rtf": 0.168,
+          "wav": "results/tts_bakeoff/edge_4.wav"
+        }
+      ]
+    },
+    "mms": {
+      "backend": "mms",
+      "format": {
+        "codec": "pcm_s16le",
+        "sample_rate": 16000,
+        "channels": 1
+      },
+      "streaming": false,
+      "warm_up_ms": 1753.504032,
+      "first_chunk_ms_p50": 152.9,
+      "total_ms_mean": 198.88,
+      "rtf_mean": 0.0406,
+      "rows": [
+        {
+          "sentence": "नमस्ते, मैं आपकी क्या मदद कर सकती हूँ?",
+          "first_chunk_ms": 199.2,
+          "total_ms": 199.2,
+          "audio_seconds": 3.79,
+          "rtf": 0.053,
+          "wav": "results/tts_bakeoff/mms_0.wav"
+        },
+        {
+          "sentence": "दिल्ली से मुंबई जाने का सबसे तेज़ तरीका हवाई जहाज़ है, जिसमें लगभग दो घंटे लगते हैं।",
+          "first_chunk_ms": 440.7,
+          "total_ms": 440.8,
+          "audio_seconds": 6.64,
+          "rtf": 0.066,
+          "wav": "results/tts_bakeoff/mms_1.wav"
+        },
+        {
+          "sentence": "आपका laptop slow होने की सबसे आम वजह पुराना software और भरी हुई disk होती है।",
+          "first_chunk_ms": 152.9,
+          "total_ms": 153.0,
+          "audio_seconds": 4.75,
+          "rtf": 0.032,
+          "wav": "results/tts_bakeoff/mms_2.wav"
+        },
+        {
+          "sentence": "एक किलो चावल में लगभग तीन हज़ार छह सौ कैलोरी होती है।",
+          "first_chunk_ms": 106.2,
+          "total_ms": 106.3,
+          "audio_seconds": 4.03,
+          "rtf": 0.026,
+          "wav": "results/tts_bakeoff/mms_3.wav"
+        },
+        {
+          "sentence": "ठीक है, मैंने कल सुबह छह बजे का alarm लगा दिया है।",
+          "first_chunk_ms": 95.0,
+          "total_ms": 95.1,
+          "audio_seconds": 3.66,
+          "rtf": 0.026,
+          "wav": "results/tts_bakeoff/mms_4.wav"
+        }
+      ]
+    }
+  },
+  "provenance": {
+    "timestamp_utc": "2026-09-24T07:34:33.484272+00:00",
+    "git_commit": "31a842f9ab890e3fd747e3149d147de24b1f9be3",
+    "git_branch": "main",
+    "git_dirty": true,
+    "argv": [
+      "/content/indic-voice-pipeline/benchmarks/tts_bakeoff.py",
+      "--backends",
+      "edge,mms",
+      "--out-dir",
+      "results/tts_bakeoff"
+    ],
+    "packages": {
+      "python": "3.13.15",
+      "torch": "2.11.0+cu128",
+      "transformers": "5.16.1",
+      "peft": "0.20.0",
+      "datasets": "3.6.0",
+      "numpy": "2.1.3"
+    },
+    "platform": "Linux-6.6.122+-x86_64-with-glibc2.39"
+  }
+}

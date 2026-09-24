@@ -1,0 +1,85 @@
+{
+  "clips": 100,
+  "wer_vs_reference": {
+    "micro_percent": 50.0895,
+    "macro_percent": 52.8273,
+    "utterances": 100,
+    "empty_references": 0,
+    "hits": 1748,
+    "substitutions": 469,
+    "deletions": 17,
+    "insertions": 633,
+    "errors": 1119,
+    "reference_length": 2234
+  },
+  "wer_vs_offline": {
+    "micro_percent": 35.1002,
+    "macro_percent": 36.5796,
+    "utterances": 100,
+    "empty_references": 0,
+    "hits": 2070,
+    "substitutions": 167,
+    "deletions": 8,
+    "insertions": 613,
+    "errors": 788,
+    "reference_length": 2245
+  },
+  "offline_wer_vs_reference": {
+    "micro_percent": 24.8881,
+    "macro_percent": 24.8717,
+    "utterances": 100,
+    "empty_references": 0,
+    "hits": 1726,
+    "substitutions": 471,
+    "deletions": 37,
+    "insertions": 48,
+    "errors": 556,
+    "reference_length": 2234
+  },
+  "streaming_penalty_points": 25.2014,
+  "structure": {
+    "clips_with_one_final": 87,
+    "clips_split": 13,
+    "clips_empty": 0,
+    "mean_finals_per_clip": 1.17,
+    "onset_hallucinations": 0,
+    "vad_agreement_mean": 1.0,
+    "vad_agreement_p10": 1.0,
+    "endpoint_reasons": {
+      "silence": 116,
+      "stream_flush": 1
+    }
+  },
+  "latency": {
+    "streamed_asr_ms_mean": 407.3,
+    "offline_asr_ms_mean": 752.2,
+    "endpoint_to_final_ms_mean": 663.7,
+    "asr_after_endpoint_ms_mean": 0.0,
+    "asr_total_ms_mean": 4259.0,
+    "decoded_seconds_mean": 3.1,
+    "finals_from_candidate": 117,
+    "finals_reused_partial": 112,
+    "partials_total": 688
+  },
+  "vad": {
+    "frame_ms": 30,
+    "hop_ms": 10,
+    "threshold_dbfs": -40.0,
+    "adaptive_threshold": true,
+    "noise_window_ms": 3000,
+    "noise_margin_db": 10.0,
+    "threshold_floor_dbfs": -70.0,
+    "min_speech_ms": 250,
+    "min_silence_ms": 600,
+    "padding_ms": 300
+  },
+  "session": {
+    "early_final_silence_ms": 300,
+    "incremental_finals": true,
+    "semantic_endpointing": true,
+    "emit_partials": true,
+    "partial_interval_ms": 1,
+    "min_partial_audio_ms": 1200
+  },
+  "sanity_warning": null
+}
