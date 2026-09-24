@@ -31,7 +31,7 @@ is worse than hoped.
 | Dialogue memory | unit-tested only | — |
 | ASR decode guards (no-speech, repetition loop) | defaults kept: WER unchanged; both guards fired on 0/300 clips | `results/eval/compare-guards.json` |
 | LLM choice | Qwen3-0.6B kept by fallback; no candidate met <800 ms first-sentence rule; human quality review pending | `results/llm_bakeoff/summary.json` |
-| TTS backend (edge vs local MMS) | MMS latency-leading; final choice pending human listening, so edge remains default | `results/tts_bakeoff/summary.json` |
+| TTS backend (edge vs local MMS) | **edge-tts selected**: MMS was faster but rejected after human listening for a significant quality issue | `results/tts_bakeoff/t4-rerun-2026-09-24/summary.json` |
 | Incremental finals, semantic endpointing | both remain off by fixed decision rules | `results/streaming_eval/summary.json` |
 | CTranslate2 engine tier | **adopt int8 tier**: 1.3145×, 1.5873% WER vs explicit | `results/gpu_validation-ct2/report.json` |
 | Compiled decode (static cache + CUDA graphs) | token-identical but **0.8526× — slower — on a T4**; off | `results/gpu_validation-ct2/report.json` |

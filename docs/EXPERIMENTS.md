@@ -450,11 +450,15 @@ No candidate meets the fixed <800 ms first-sentence threshold. **Decision:
 keep Qwen3-0.6B**, the prescribed fallback and fastest candidate; final Hindi
 answer quality remains pending human review of the saved outputs.
 
-**TTS bake-off.** MMS had a lower first-chunk p50 (**152.9 ms**) than edge
-(**883.1 ms**) on the five benchmark sentences; mean RTF was 0.0406 versus
-edge's 0.2130. The archive excludes WAVs, so acceptable Hindi audio has not
-been independently reviewed. **Decision: retain edge as the default pending
-human listening; MMS is the latency-leading candidate.**
+**TTS bake-off and human listening.** A rerun at commit `a708857` (dirty
+worktree) measured MMS first-chunk p50 at **124.6 ms** versus edge at
+**607.8 ms**, and mean RTF 0.0404 versus 0.2070, over the same five Hindi
+sentences. Evidence:
+`results/tts_bakeoff/t4-rerun-2026-09-24/summary.json`. A human listener
+reviewed the regenerated clips and reported a significant MMS quality issue.
+**Decision: retain edge-tts; reject MMS despite its latency advantage.** This
+is the required human-quality condition in the pre-registered rule, not an
+inference from latency metrics.
 
 **Streaming decisions.** On 100 seeded FLEURS-hi test clips, `early` had
 12.3831% WER versus offline and 14 split clips at 652.8 ms mean
