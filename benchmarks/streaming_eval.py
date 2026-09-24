@@ -450,6 +450,9 @@ def main(argv: list[str] | None = None) -> int:
             "endpoint_to_final_ms": metrics["latency"]["endpoint_to_final_ms_mean"],
             "asr_after_endpoint_ms": metrics["latency"]["asr_after_endpoint_ms_mean"],
             "asr_total_ms": metrics["latency"]["asr_total_ms_mean"],
+            # Carried into the summary so a reader cannot miss that a config
+            # measured nothing about the thing it is named for.
+            "sanity_warning": warning,
         }
     offline_wer = aggregate(per_config[names[0]], args.level)["offline_wer_vs_reference"]
     write_json(out_dir / "summary.json", {
