@@ -118,12 +118,18 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--remote", default="origin")
     parser.add_argument("--token-env", default="GITHUB_TOKEN")
     parser.add_argument("--message", default="evidence(colab): publish benchmark results")
+    parser.add_argument("--author-name", default="Colab evidence bot",
+                        help="Local Git author name for the evidence commit")
+    parser.add_argument("--author-email", default="colab-evidence@users.noreply.github.com",
+                        help="Local Git author email for the evidence commit")
     args = parser.parse_args(argv)
 
     root = Path(git("rev-parse", "--show-toplevel").stdout.strip())
     ensure_no_tracked_code_changes()
     configure_ephemeral_github_credential(args.remote, args.token_env)
     switch_evidence_branch(args.remote, args.branch)
+    git("config", "--local", "user.name", args.author_name)
+    git("config", "--local", "user.email", args.author_email)
     paths = evidence_paths(root)
     if not paths:
         raise SystemExit("No allowlisted evidence files found under results/.")
