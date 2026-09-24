@@ -400,6 +400,14 @@ class NotebookAgent:
                 "spoken_units": len(result.speech.sentences) if result.speech else 0,
                 "first_unit_chars": (len(result.speech.sentences[0])
                                      if result.speech and result.speech.sentences else 0),
+                # Prefill grows with the prompt, and the prompt grows with
+                # history: across 12 live turns first_token_ms rose 209 -> 1474
+                # ms (r=0.99 against turn index). Recording the history size
+                # makes that visible per turn instead of hidden in a mean.
+                "history_turns": (self.conversation.snapshot()["turns"]
+                                  if self.conversation else 0),
+                "history_tokens": (self.conversation.history_tokens()
+                                   if self.conversation else 0),
                 "sink": sink if speak else None,
             })
 
@@ -407,6 +415,18 @@ class NotebookAgent:
                    if u.kind == UpdateKind.FINAL and (u.no_speech or u.degenerate)]
         record_ = {
             "audio": str(audio_path), "audio_seconds": round(seconds, 2),
+            # Without these a latency distribution cannot be attributed to a
+            # configuration: 12 records were persisted with no LLM name, TTS
+            # backend or device, so they supported a latency claim but not a
+            # comparison between candidates.
+            "config": {
+                "whisper": self.config["whisper"], "adapter": self.config["adapter"],
+                "llm": self.config["llm"], "tts": self.config["tts"],
+                "language": self.language, "max_tokens": max_tokens,
+                "device": str(getattr(self.llm, "device", None)),
+                "dtype": str(getattr(self.llm, "dtype", None)),
+                "quantization": getattr(self.llm, "quantization", None),
+            },
             "vad": config.vad.as_dict(),
             "utterances": len(finals),
             "dropped_finals": len(dropped),

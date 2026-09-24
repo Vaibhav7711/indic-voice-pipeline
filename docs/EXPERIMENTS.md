@@ -382,6 +382,58 @@ WER target of 22.0% is recorded as **missed**, not retroactively lowered, and
 the reason (half the optimizer steps) is documented above so the number is
 interpretable. Anyone resuming this work should start with that v3 re-run.
 
+## Live turn latency: where the 4.4 s goes (2026-09-24)
+
+Twelve live turns through `NotebookAgent.stream_turn()` on a Colab T4
+(whisper-large-v3-turbo + LoRA v2, Qwen3-0.6B, edge-tts). Evidence:
+`results/live/turns.jsonl`.
+
+| Metric | Value |
+| --- | ---: |
+| Response latency p50 | 4435.5 ms |
+| Response latency p90 | 5069.6 ms |
+| Response latency mean | 4129.5 ms |
+| Endpoint → final transcript (mean) | 660.8 ms |
+| ASR after the endpoint | ~0 ms (candidate reused on every turn) |
+| Transcript → first LLM token (mean) | 877.9 ms |
+| First token → first audio (mean) | 2590.7 ms |
+| ⤷ LLM until a unit was speakable | 2445.7 ms |
+| ⤷ synthesis of that unit | 145.0 ms |
+
+ASR is not the bottleneck and TTS is not the bottleneck. **94% of the
+controllable latency is the LLM**, in two separable parts.
+
+### Prefill grows with dialogue history — it is not a fixed cost
+
+`first_token_ms` rises monotonically across the session: 209, 275, 376, 486,
+704, 844, 1024, 1145, 1292, 1259, 1447, 1474 ms — Pearson r = **0.99**
+against turn index, a 7× increase. Reporting the 877.9 ms mean as a constant
+hides this; the cost is the conversation prompt getting longer, since
+`Conversation` keeps up to 6 exchanges (800 tokens).
+
+Holding prefill at its turn-1 value would put mean latency at **3461 ms**
+instead of 4129 ms. Options, cheapest first: a smaller history budget; or
+KV-cache reuse across turns, since the system prompt and the older exchanges
+are a stable prefix and only the tail changes. Neither is measured yet.
+
+### The first speakable unit costs ~61 ms per character
+
+The first spoken unit averaged 41.2 characters and took 2445.7 ms to
+produce — about 61 ms per character at ~42 ms/token. Three of twelve turns
+ran to the 96-token cap, so the "answer in one or two short sentences"
+instruction is not reliably obeyed by Qwen3-0.6B.
+
+`max_unit_chars` is 60. At the measured rate, cutting it to 30 would put the
+first unit out in roughly **1841 ms** instead of 2446 ms — about 600 ms — at
+the cost of a breath in a slightly odder place. Not measured; worth an A/B.
+
+### What this does not support
+
+These records were persisted without their configuration (no LLM name, TTS
+backend, GPU or commit), so they support a latency distribution and **not**
+a comparison between model candidates. `demo/notebook.py` now records that
+block per turn, so the next run does not have the same gap.
+
 ### Streaming evaluation (2026-09-21)
 
 `benchmarks/streaming_eval.py`, Hindi LoRA v1, 100 seeded FLEURS-hi test clips

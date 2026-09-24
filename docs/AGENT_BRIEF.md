@@ -27,7 +27,7 @@ is worse than hoped.
 | ASR (whisper-large-v3-turbo + Hindi LoRA v2) | **measured candidate; unpublished artifact**: guards-on 23.8265% WER / 8.4585% CER, 765.675 ms p50 on 300 seeded FLEURS-hi clips | `results/eval/v2-guards-on/`; adapter remains unavailable |
 | Explicit encoder/decoder runtime | validated token-identical to `generate()` on real Hindi audio | `results/gpu_validation/report.json` |
 | Streaming ASR + adaptive VAD | validated on 100 clips; streaming at offline parity | `results/streaming_eval/` |
-| Agent turn (LLM stream → sentences → TTS → playback, barge-in) | logic validated; one live turn measured at 719.8 ms response latency (first-token field is a prefill proxy) | `results/gpu_validation/report.json` |
+| Agent turn (LLM stream → sentences → TTS → playback, barge-in) | logic validated. **Do not cite the 719.8 ms in `results/gpu_validation/report.json`**: that report predates commit `593e97b` and its value comes from a `speech_end_to_transcript_ms=0.0` stub, so it omits ~3.8 s of LLM decode. The sweep has not been re-run since. Use the live distribution instead | `results/live/turns.jsonl` |
 | Dialogue memory | unit-tested only | — |
 | ASR decode guards (no-speech, repetition loop) | defaults kept: WER unchanged; both guards fired on 0/300 clips | `results/eval/compare-guards.json` |
 | LLM choice | Qwen3-0.6B kept by fallback; no candidate met <800 ms first-sentence rule; human quality review pending | `results/llm_bakeoff/summary.json` |
@@ -121,9 +121,9 @@ table; recompute rather than trusting it if a candidate changes.
 
 ### Phase 1 — regression check (first, before anything else)
 
-The decode guards in commit `55f5c1e` (no-speech threshold 0.6, repetition
-loop guard) changed serving behaviour and their effect on WER was never
-measured. A no-speech suppression on a clip that *does* contain speech deletes
+The decode guards in commit `df6f5b2` (no-speech threshold 0.6, repetition
+loop guard; `55f5c1e` is the separate token-budget fix) changed serving
+behaviour and their effect on WER was never measured. A no-speech suppression on a clip that *does* contain speech deletes
 a whole utterance. Everything downstream is meaningless if this is a
 regression.
 
