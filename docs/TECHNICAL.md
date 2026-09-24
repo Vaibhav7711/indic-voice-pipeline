@@ -35,7 +35,8 @@ Hardware target: Google Colab with a Tesla T4 GPU (14.6 GiB VRAM).
 - Understanding of encoder-decoder ASR architectures (not just decoder-only LLMs)
 - Ability to own the inference loop for Whisper (explicit encoder/decoder with
   dual KV cache management)
-- LoRA fine-tuning for Indic languages (Hindi WER: 75.8% → 37.7%)
+- LoRA fine-tuning for Indic languages (shipped turbo Hindi WER: 23.83%;
+  historical whisper-small result: 75.8% → 37.7%)
 - Multi-model pipeline engineering on constrained hardware
 - Per-stage CUDA timing and latency breakdown
 - Honest measurement and documentation of limitations
@@ -188,7 +189,7 @@ Hindi audio (16 kHz WAV, up to 30s)
 [3] decoder.py — WhisperDecoder.prefill() + decode_one() loop
      │   GPU: 12 decoder layers × (self-attn + cross-attn + FFN)
      │   Prefill: 4 prompt tokens → first output logit
-     │   Decode: token-by-token until EOS or 225 max
+     │   Decode: token-by-token until EOS or the model-derived token budget
      │   Populates both KV caches during prefill
      │   Timed: CUDA events per step
      │   Output: list of token IDs
@@ -544,10 +545,10 @@ the full pipeline, prints the latency waterfall.
 transcript, LLM answer, latency breakdown, and optionally hear the TTS
 output. Models are lazy-loaded on first request.
 
-### `setup.py`
+### `pyproject.toml`
 
 **Purpose**: Makes the project installable with `pip install -e .`.
-`find_packages()` discovers `asr`, `llm`, `pipeline`, `tts`, `benchmarks`
+The package discovery configuration finds `asr`, `llm`, `pipeline`, `tts`, `benchmarks`
 as importable Python packages. Required because running
 `python scripts/demo.py` wouldn't find `from asr.explicit import ...`
 without this.
@@ -702,9 +703,9 @@ Devanagari text. Audio durations range from ~3-15 seconds.
 ### Results
 
 ```
-Baseline WER (pre-fine-tuning):  75.80%
-Fine-tuned WER:                  37.66%
-Improvement:                     38.14 percentage points (50% relative)
+Historical whisper-small baseline WER: 75.80%
+Historical whisper-small fine-tuned WER: 37.66%
+Current turbo + Hindi LoRA v2 WER: 23.83% (measured on an unpublished artifact)
 Train loss:                      0.945
 Training time:                   ~30 minutes on T4
 ```
@@ -774,8 +775,9 @@ effects. Both achieve RTF ~0.28 (3.5x faster than real-time).
 
 | Model | WER (50 FLEURS Hindi) |
 | --- | ---: |
-| Whisper-small (baseline) | 75.80% |
-| Whisper-small (LoRA fine-tuned) | 37.66% |
+| Whisper-small (baseline, historical) | 75.80% |
+| Whisper-small (LoRA fine-tuned, historical) | 37.66% |
+| Whisper-large-v3-turbo + Hindi LoRA v2 (unpublished artifact) | 23.83% |
 
 ### Pipeline latency
 
@@ -800,31 +802,26 @@ LLM decode dominates both pipelines (~60% of total time).
    `<think>` reasoning. The LLM is a plug-in — swapping in Sarvam-2 or
    Gemma-2-2B-IT improves quality without pipeline changes.
 
-2. **Audio length**: Whisper processes max 30 seconds per chunk. Longer
-   audio requires chunking with overlap and stitching, which this pipeline
-   doesn't implement.
+2. **Hard-set coverage**: `data/hard_set/` is empty, so robustness by noisy,
+   numeric, code-switched, and other adversarial categories is unmeasured.
 
 3. **Batch size 1 only**: The pipeline processes one request at a time. No
    concurrent batching, no request queuing.
 
-4. **No streaming**: The LLM generates all tokens before TTS starts. A
-   production system would stream TTS as LLM sentences complete.
+4. **Live-turn coverage**: the notebook path supports live turns, but a
+   distribution of measured turns is still open; device-level barge-in is
+   validated only on a laptop because Colab has no audio output device.
 
-5. **WER still 37.7%**: Roughly 1 in 3 Hindi words is wrong. More training
-   data (CommonVoice, MUCS code-switched corpus) and more epochs would
-   improve this. Whisper-medium with LoRA would likely reach ~20% WER.
+5. **LLM quality**: Qwen3-0.6B's Hindi fluency and the final LLM/TTS choice
+   remain pending automatic bake-off results and human listening.
 
-6. **No correctness test for Hindi**: The ASR correctness test uses a
-   synthetic tone, not real Hindi speech. A proper test would compare
-   explicit-loop output vs model.generate() on Hindi audio.
 
 ### Potential extensions
 
 1. Swap LLM for a stronger Indic model (Gemma-2-2B with AWQ quantization)
 2. Add code-switched Hindi-English training data (MUCS corpus)
-3. Implement 30-second chunking for longer audio
-4. Stream TTS synthesis concurrent with LLM generation
-5. Add Whisper-medium with LoRA for better WER
-6. Implement the sequential memory strategy benchmark (currently untested
+3. Curate and score the hard set with a human-verified transcript and category
+4. Complete the live-turn distribution and human audio-quality review
+5. Implement the sequential memory strategy benchmark (currently untested
    because Whisper-small + Qwen-0.6B always fits concurrently)
 7. Profile with torch.profiler to find actual bottlenecks in the decode loop

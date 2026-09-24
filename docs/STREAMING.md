@@ -490,7 +490,7 @@ offline decode is shared across configs, so a grid of *k* configs costs
 python -m benchmarks.streaming_eval \
     --adapter Hugme6969/whisper-medium-hindi-lora \
     --split test --limit 100 --seed 0 \
-    --grid default,fixed40,pad300,floor70 \
+    --grid default,fixed40,pad200,pad500,floor60,floor80 \
     --out-dir results/streaming_eval/medium-lora-test-100
 ```
 

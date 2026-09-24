@@ -31,7 +31,7 @@ Usage::
     python -m benchmarks.streaming_eval \\
         --adapter Hugme6969/whisper-medium-hindi-lora \\
         --split test --limit 100 --seed 0 \\
-        --grid default,pad300,floor70,pad300-floor70 \\
+        --grid default,pad200,pad500,floor60,floor80 \\
         --out-dir results/streaming_eval/medium-lora-test-100
 
 Outputs, per config, under ``<out-dir>/<config>/``: ``clips.jsonl`` (one row
@@ -61,8 +61,12 @@ VAD_GRID: dict[str, dict] = {
     # The defaults as first benchmarked (results/streaming_eval/medium-lora-test-100).
     "v1-adaptive": {"padding_ms": 200, "threshold_floor_dbfs": -60.0},
     "pad200": {"padding_ms": 200},
+    # Retained as compatibility names for the committed pre-2026-09-20
+    # evidence directories and the original reproduction notebook.
+    "pad300": {"padding_ms": 300},
     "pad500": {"padding_ms": 500},
     "floor60": {"threshold_floor_dbfs": -60.0},
+    "floor70": {"threshold_floor_dbfs": -70.0},
     "floor80": {"threshold_floor_dbfs": -80.0},
     "sil400": {"min_silence_ms": 400},
     "sil800": {"min_silence_ms": 800},

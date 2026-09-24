@@ -409,8 +409,10 @@ CPU, and saved predictions can be re-scored anywhere.
 
 All numbers below are from `benchmarks/asr_eval.py` on the same seeded random
 300-example subset of FLEURS Hindi test (`--seed 0`, `standard` normalization,
-Tesla T4, fp16, LoRA merged, explicit `ASRRunner`). Evidence:
-`results/eval/medium-base-test-300-seed0/`, `results/eval/medium-lora-test-300-seed0/`.
+Tesla T4, fp16, LoRA merged, explicit `ASRRunner`). The committed medium rows
+are evidenced by `results/eval/medium-base-test-300-seed0/` and
+`results/eval/medium-lora-test-300-seed0/`. The turbo rows were measured on an
+unpublished adapter artifact and are not reproducible from this checkout.
 
 ### ASR quality on the same 300 clips
 
@@ -423,7 +425,7 @@ token-budget bug that inflated earlier numbers, in `docs/EXPERIMENTS.md`.
 | whisper-medium base | 40.43% | 16.74% | 2461 ms | 0.230 |
 | medium + LoRA v1 | 25.82% | 9.61% | 2540 ms | 0.238 |
 | large-v3-turbo base | 30.40% | 11.55% | 1238 ms | 0.117 |
-| **turbo + LoRA v2 (shipped)** | **23.83%** | **8.43%** | **694 ms** | **0.066** |
+| **turbo + LoRA v2 (measured; unpublished artifact)** | **23.83%** | **8.43%** | **694 ms** | **0.066** |
 
 v2 is both better and 3.7× faster: `large-v3-turbo` keeps large-v3's encoder
 and distils the decoder to 4 layers, and ASR decode is the dominant term in
@@ -447,19 +449,19 @@ merged adapter costs ~3% latency.
 ### Full pipeline waterfall (whisper-medium + LoRA v1 → Qwen3-0.6B)
 
 From `scripts/gpu_validation.py` (`pipeline_waterfall`, mean of 3 runs after
-warm-up, one ~10 s FLEURS clip, 48-token LLM budget, T4, commit `ee2b7c3`).
+warm-up, one ~10 s FLEURS clip, 48-token LLM budget, T4, commit `21ebce7`).
 Evidence: `results/gpu_validation/report.json`.
 
 | Stage | Time |
 | --- | ---: |
-| Mel extraction | 7.7 ms |
-| Whisper encoder | 74.8 ms |
-| ASR decode | 1711 ms |
-| LLM prefill | 100 ms |
-| LLM decode (~47 tokens @ ~41 ms) | 1922 ms |
-| **Total pipeline** | **3885 ms** |
-| Audio → first LLM token | 1938 ms |
-| Peak VRAM | 2.9 GiB (concurrent strategy) |
+| Mel extraction | 14.4 ms |
+| Whisper encoder | 80.4 ms |
+| ASR decode | 1900.2 ms |
+| LLM prefill | 105.0 ms |
+| LLM decode (~47 tokens @ ~49 ms) | 2323.6 ms |
+| **Total pipeline** | **4514.5 ms** |
+| Audio → first LLM token | 2159.3 ms |
+| Peak VRAM | 2.6 GiB (concurrent strategy) |
 
 ASR decode and LLM decode are each ~45% of the turn; both are per-token
 sequential cost, which is why the agent path streams sentences to TTS rather

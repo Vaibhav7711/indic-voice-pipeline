@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from types import SimpleNamespace
 
 import numpy as np
@@ -42,6 +43,20 @@ def test_grid_names_resolve_and_default_is_untouched():
     assert vad_from_name("pad500").padding_ms == 500
     assert vad_from_name("fixed40").adaptive_threshold is False
     assert set(VAD_GRID) >= {"default", "fixed40", "v1-adaptive", "pad500", "floor60"}
+
+
+def test_result_directories_use_current_grid_names():
+    root = Path("results/streaming_eval")
+    if not root.exists():
+        return
+    result_names = {
+        config_dir.name
+        for run_dir in root.iterdir()
+        if run_dir.is_dir()
+        for config_dir in run_dir.iterdir()
+        if config_dir.is_dir()
+    }
+    assert result_names <= set(VAD_GRID)
 
 
 def test_stream_clip_reports_one_final_and_full_vad_agreement():

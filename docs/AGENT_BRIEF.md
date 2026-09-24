@@ -27,7 +27,7 @@ is worse than hoped.
 | ASR (whisper-large-v3-turbo + Hindi LoRA v2) | **shipped**: 23.83% WER, 8.43% CER, 694 ms p50, RTF 0.066 on 300 seeded FLEURS-hi test clips | `docs/EXPERIMENTS.md`, `results/eval/` |
 | Explicit encoder/decoder runtime | validated token-identical to `generate()` on real Hindi audio | `results/gpu_validation/report.json` |
 | Streaming ASR + adaptive VAD | validated on 100 clips; streaming at offline parity | `results/streaming_eval/` |
-| Agent turn (LLM stream → sentences → TTS → playback, barge-in) | logic validated; one live turn at 1.57 s response latency | `results/gpu_validation/report.json` |
+| Agent turn (LLM stream → sentences → TTS → playback, barge-in) | logic validated; one live turn measured at 719.8 ms response latency (first-token field is a prefill proxy) | `results/gpu_validation/report.json` |
 | Dialogue memory | unit-tested only | — |
 | ASR decode guards (no-speech, repetition loop) | **added, effect on WER never measured** | none — this is Phase 1 |
 | LLM choice | **open.** Qwen3-0.6B answers Hindi questions by restating them | none |
