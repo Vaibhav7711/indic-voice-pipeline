@@ -291,8 +291,10 @@ recorded against these.
 ## v2: Whisper-large-v3-turbo Hindi LoRA (2026-09-22)
 
 `--preset v2-turbo`: v1's recipe with the base model swapped (decision and
-rationale above). Adapter: `/kaggle/working/v2-final/best`, checkpoints in a
-private Hub repo. Evidence:
+rationale above). The measured adapter was at the ephemeral path
+`/kaggle/working/v2-final/best` and its checkpoint repo was private, so the
+weights are not obtainable or reproducible from this checkout. Evidence from
+that run:
 `results/eval/turbo-lora-v2-test-300-seed0-full/` (seed 0, 300 clips,
 `standard`, Tesla T4, fp16, commit `55f5c1e`).
 
@@ -333,7 +335,8 @@ now use 448, so v3 is the first run without it.
 
 ### Decision
 
-**v2 replaces v1 as the served adapter.** Better on WER, CER and every
+**v2 is the measured candidate, not a reproducible shipped artifact.** It was
+better on WER, CER and every
 latency measure (ASR decode 1712 ms → 380 ms in the pipeline waterfall), and
 it passes unrestricted language detection, which v1 cannot. It misses its
 WER target of 22.0% by 1.8 points, so it is *accepted but not final*:

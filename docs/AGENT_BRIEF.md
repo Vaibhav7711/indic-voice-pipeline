@@ -24,7 +24,7 @@ is worse than hoped.
 
 | Component | Status | Evidence |
 | --- | --- | --- |
-| ASR (whisper-large-v3-turbo + Hindi LoRA v2) | **shipped**: 23.83% WER, 8.43% CER, 694 ms p50, RTF 0.066 on 300 seeded FLEURS-hi test clips | `docs/EXPERIMENTS.md`, `results/eval/` |
+| ASR (whisper-large-v3-turbo + Hindi LoRA v2) | **measured candidate; unpublished artifact**: 23.83% WER, 8.43% CER, 694 ms p50, RTF 0.066 on 300 seeded FLEURS-hi test clips | `docs/EXPERIMENTS.md`; evidence not committed |
 | Explicit encoder/decoder runtime | validated token-identical to `generate()` on real Hindi audio | `results/gpu_validation/report.json` |
 | Streaming ASR + adaptive VAD | validated on 100 clips; streaming at offline parity | `results/streaming_eval/` |
 | Agent turn (LLM stream → sentences → TTS → playback, barge-in) | logic validated; one live turn measured at 719.8 ms response latency (first-token field is a prefill proxy) | `results/gpu_validation/report.json` |

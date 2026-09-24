@@ -146,6 +146,7 @@ class TestVerifyAdapter:
         assert info["r"] == 16
         assert info["peft_type"] == "LORA"
         assert info["has_tokenizer"] is False
+        assert len(info["weights_sha256"]) == 64
 
     def test_tokenizer_detected(self, tmp_path):
         ckpt = make_checkpoint(tmp_path, 100, tokenizer=True)

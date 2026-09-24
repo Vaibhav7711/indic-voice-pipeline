@@ -24,6 +24,7 @@ once and verifies it there.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 import shutil
@@ -229,9 +230,14 @@ def verify_adapter(path: str | Path) -> dict:
         )
 
     config = json.loads((path / "adapter_config.json").read_text(encoding="utf-8"))
+    digest = hashlib.sha256()
+    with weights.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
     return {
         "path": str(path),
         "weights_bytes": actual,
+        "weights_sha256": digest.hexdigest(),
         "has_tokenizer": (path / "tokenizer_config.json").is_file(),
         "peft_type": config.get("peft_type"),
         "r": config.get("r"),
