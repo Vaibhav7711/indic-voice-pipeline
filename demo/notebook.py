@@ -415,12 +415,19 @@ class NotebookAgent:
             "trace": trace,
             "answers": [{k: v for k, v in a.items() if k != "sink"} for a in answers],
         }
-        self.turns.extend({"audio": str(audio_path), "streaming": True,
-                           "asr_ms": a["asr_ms"], "asr_rtf": None,
-                           "first_token_ms": a["first_token_ms"],
-                           "to_audio_ms": a["to_audio_ms"],
-                           "response_latency_ms": a["response_latency_ms"],
-                           "turn_total_ms": None} for a in answers)
+        # Persist the complete per-answer record, not a latency-only projection:
+        # turns.jsonl is the live-run evidence and must retain the transcript,
+        # endpoint timing, and LLM/TTS decomposition used in the ledger.
+        self.turns.extend(
+            {
+                "audio": str(audio_path),
+                "streaming": True,
+                "asr_rtf": None,
+                "turn_total_ms": None,
+                **{key: value for key, value in answer.items() if key != "sink"},
+            }
+            for answer in answers
+        )
         if not quiet:
             self._show_stream(record_, answers)
         return record_
@@ -488,20 +495,25 @@ class NotebookAgent:
         print("conversation cleared")
 
     def summary(self) -> dict:
-        """Aggregate the session's latencies — a measured claim, not a demo."""
+        """Aggregate streaming and offline turns separately."""
         if not self.turns:
             return {}
 
-        def mean(key):
-            values = [t[key] for t in self.turns if t.get(key) is not None]
-            return round(float(np.mean(values)), 1) if values else None
+        def measures(rows: list[dict]) -> dict:
+            def mean(key):
+                values = [row[key] for row in rows if row.get(key) is not None]
+                return round(float(np.mean(values)), 1) if values else None
 
-        return {
-            "turns": len(self.turns),
-            "asr_ms_mean": mean("asr_ms"),
-            "asr_rtf_mean": mean("asr_rtf"),
-            "first_token_ms_mean": mean("first_token_ms"),
-            "to_audio_ms_mean": mean("to_audio_ms"),
-            "response_latency_ms_mean": mean("response_latency_ms"),
-            "turn_total_ms_mean": mean("turn_total_ms"),
-        }
+            return {
+                "turns": len(rows),
+                "asr_ms_mean": mean("asr_ms"),
+                "asr_rtf_mean": mean("asr_rtf"),
+                "first_token_ms_mean": mean("first_token_ms"),
+                "to_audio_ms_mean": mean("to_audio_ms"),
+                "response_latency_ms_mean": mean("response_latency_ms"),
+                "turn_total_ms_mean": mean("turn_total_ms"),
+            }
+
+        streaming = [row for row in self.turns if row.get("streaming")]
+        offline = [row for row in self.turns if not row.get("streaming")]
+        return {"streaming": measures(streaming), "offline": measures(offline)}

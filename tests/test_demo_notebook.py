@@ -46,7 +46,7 @@ class TestNotebookAgent:
             {"asr_ms": 900.0, "asr_rtf": 0.09, "first_token_ms": 110.0,
              "to_audio_ms": None, "response_latency_ms": None, "turn_total_ms": 2400.0},
         ]
-        s = agent.summary()
+        s = agent.summary()["offline"]
         assert s["turns"] == 2
         assert s["asr_ms_mean"] == 800.0
         assert s["first_token_ms_mean"] == 100.0
@@ -190,8 +190,9 @@ class TestStreamTurn:
         agent, path = _wired_agent(tmp_path, seconds=2.0)
         agent.stream_turn(path, quiet=True, speak=False)
         summary = agent.summary()
-        assert summary["turns"] == 1
-        assert summary["response_latency_ms_mean"] is not None
+        assert summary["streaming"]["turns"] == 1
+        assert summary["offline"]["turns"] == 0
+        assert summary["streaming"]["response_latency_ms_mean"] is not None
 
 
 def test_stream_turn_decomposes_the_time_to_first_audio(tmp_path):
@@ -206,6 +207,10 @@ def test_stream_turn_decomposes_the_time_to_first_audio(tmp_path):
     assert answer["spoken_units"] >= 1
     assert answer["first_unit_chars"] > 0
     assert answer["tts_first_chunk_ms"] is not None
+    persisted = agent.turns[0]
+    for key in ("transcript", "response", "endpoint_to_final_ms",
+                "first_token_to_first_unit_ms", "tts_synthesis_ms"):
+        assert key in persisted, key
 
 
 class TestInputGain:

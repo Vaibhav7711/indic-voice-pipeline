@@ -11,6 +11,7 @@ import importlib.util
 import json
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -69,6 +70,20 @@ def test_state_round_trips_and_survives_corruption(tmp_path):
     assert bench_all.load_state(tmp_path) == {"llm": {"returncode": 0}}
     (tmp_path / bench_all.STATE_FILE).write_text("{not json")
     assert bench_all.load_state(tmp_path) == {}, "a corrupt state file re-runs, never skips"
+
+
+def test_guards_on_command_records_override_values():
+    args = SimpleNamespace(
+        out_root="results", adapter="/adapter", limit=300,
+        no_speech_threshold=0.9, loop_guard_ngram=5, loop_guard_repeats=6,
+        llm_models="x", tts_backends="edge", streaming_limit=100,
+        ct2_dir="models/ct2",
+    )
+    command = next(step["cmd"] for step in bench_all.steps(args)
+                   if step["name"] == "guards_on")
+    assert command[command.index("--no-speech-threshold") + 1] == "0.9"
+    assert command[command.index("--loop-guard-ngram") + 1] == "5"
+    assert command[command.index("--loop-guard-repeats") + 1] == "6"
 
 
 def test_mirror_preserves_the_path_so_it_can_be_restored(tmp_path):

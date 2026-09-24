@@ -54,6 +54,9 @@ def steps(args) -> list[dict]:
     adapter = args.adapter
     eval_common = ["--split", "test", "--limit", str(args.limit), "--seed", "0",
                    "--dtype", "float16"]
+    guards_on = ["--no-speech-threshold", str(args.no_speech_threshold),
+                 "--loop-guard-ngram", str(args.loop_guard_ngram),
+                 "--loop-guard-repeats", str(args.loop_guard_repeats)]
     return [
         {
             "name": "unit_tests",
@@ -69,8 +72,9 @@ def steps(args) -> list[dict]:
             "decides": "WER with today's decode guards (the shipped default)",
             "cmd": [sys.executable, "-m", "benchmarks.asr_eval", "run",
                     "--model", TURBO, "--adapter", adapter, *eval_common,
+                    *guards_on,
                     "--out-dir", str(root / "eval/v2-guards-on"),
-                    "--note", "decode guards at defaults"],
+                    "--note", "decode guards with configured threshold and loop guard"],
             "out": root / "eval/v2-guards-on",
         },
         {
@@ -254,6 +258,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--limit", type=int, default=300,
                         help="Clips for the ASR evaluations")
     parser.add_argument("--streaming-limit", type=int, default=100)
+    parser.add_argument("--no-speech-threshold", type=float, default=0.6,
+                        help="Guard threshold for guards_on; negative disables it")
+    parser.add_argument("--loop-guard-ngram", type=int, default=3,
+                        help="Repeated n-gram length for guards_on; 0 disables it")
+    parser.add_argument("--loop-guard-repeats", type=int, default=4,
+                        help="Repeated n-grams required for guards_on to stop decoding")
     parser.add_argument("--llm-models",
                         default="Qwen/Qwen3-0.6B,Qwen/Qwen3-1.7B,Qwen/Qwen3-4B",
                         help="Comma-separated; a 'name:4bit' spec loads that "
