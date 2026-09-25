@@ -83,10 +83,23 @@ ASCII never triggers it, which is why it survived a suite whose streaming
 tests are all English.
 
 **This blocks the whole sweep.** Corrupted text goes to TTS and is pronounced.
-The fix is four lines in the engine, in
-[`ENGINE_BUG_UTF8_STREAMING.md`](ENGINE_BUG_UTF8_STREAMING.md) with the
-reproduction. A larger model does not help — any byte-level BPE over any
-multi-byte script hits it.
+A larger model does not help — any byte-level BPE over any multi-byte script
+hits it.
+
+Apply the fix before starting the server; uvicorn imports the module once:
+
+```bash
+python scripts/patch_engine_utf8.py --engine-root ../full-inference-engine
+python scripts/patch_engine_utf8.py --engine-root ../full-inference-engine --check
+```
+
+It is idempotent, so a re-run of a Colab notebook is safe, and it refuses
+rather than guessing if the engine's `_stream` has changed — which is what
+upstream fixing this itself looks like, and the right response then is to
+delete the patcher.
+[`ENGINE_BUG_UTF8_STREAMING.md`](ENGINE_BUG_UTF8_STREAMING.md) is the report
+to send upstream: the byte-level walkthrough, the patch and the three tests
+that would have caught it.
 
 Downstream, `HttpEngineMetrics.replacement_chars` counts U+FFFD, the startup
 probe uses a Devanagari prompt so this is caught before the first turn, and
