@@ -30,6 +30,17 @@ characters, which is what the user actually hears before the sentence buffer
 hands the first unit to TTS -- and reports full-text agreement separately
 rather than gating on it. A divergence in the first few characters is a real
 defect: it means prefill differs, not that decode drifted.
+
+**Agreement depends on model size, and the report says so rather than leaving
+it to be rediscovered.** A greedy decoder diverges at the first step where two
+implementations rank the top two candidates differently, and how often that
+happens depends on how close those candidates are. A small model has flatter
+logits and smaller top-two margins, so an fp16 rounding difference flips a
+tie more readily and the shared prefix is shorter; a larger model is more
+confident per step and agrees for longer. Low agreement at 0.6B is therefore
+weak evidence of an engine defect and strong evidence of a near-tie, which is
+why this reports mean shared-prefix *fraction* alongside the pass/fail: it is
+the number to compare across checkpoints, and a bare "they disagreed" is not.
 """
 
 from __future__ import annotations
@@ -90,22 +101,34 @@ def summarize(results: list[dict]) -> dict:
     """Aggregate. Rates are `None` on an empty sample rather than 1.0 or 0.0."""
     total = len(results)
     if not total:
-        return {"prompts": 0, "agreed": None, "identical": None, "passed": False}
+        return {"prompts": 0, "agreed": None, "identical": None, "passed": False,
+                "mean_shared_prefix_chars": None, "mean_shared_fraction": None}
     agreed = sum(1 for item in results if item["comparison"]["agreed"])
     identical = sum(1 for item in results if item["comparison"]["identical"])
+    comparisons = [item["comparison"] for item in results]
+    shared = [item["shared_prefix_chars"] for item in comparisons]
+    # How much of the reference each served response reproduced. This is the
+    # figure to compare between checkpoints: it distinguishes "the engine is
+    # wrong" from "this model's top-two logits are close enough that an fp16
+    # rounding difference decides the token".
+    fractions = [item["shared_prefix_chars"] / item["reference_chars"]
+                 for item in comparisons if item["reference_chars"]]
     return {
         "prompts": total,
         "agreed": agreed,
         "identical": identical,
         "agreement_rate": agreed / total,
         "identity_rate": identical / total,
+        "mean_shared_prefix_chars": sum(shared) / len(shared) if shared else None,
+        "mean_shared_fraction": (sum(fractions) / len(fractions)
+                                 if fractions else None),
         "passed": agreed == total,
     }
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    parser.add_argument("--llm-model", default="Qwen/Qwen3-0.6B")
+    parser.add_argument("--llm-model", default="Qwen/Qwen3-4B")
     parser.add_argument("--llm-base-url", default="http://127.0.0.1:8000/v1")
     parser.add_argument("--llm-api-key", default=None)
     parser.add_argument("--device", default=None)
@@ -185,9 +208,17 @@ def main(argv: list[str] | None = None) -> int:
     out_path.write_text(json.dumps(report, ensure_ascii=False, indent=2),
                         encoding="utf-8")
 
+    fraction = summary["mean_shared_fraction"]
     print(f"\n{summary['agreed']}/{summary['prompts']} agreed on the first "
           f"{args.prefix_chars} characters; "
           f"{summary['identical']}/{summary['prompts']} identical throughout")
+    if fraction is not None:
+        print(f"mean shared prefix: {summary['mean_shared_prefix_chars']:.1f} chars "
+              f"= {fraction:.1%} of the reference response")
+        print("Compare that fraction across checkpoints before reading a low "
+              "figure as an engine defect: a small model's top-two logits are "
+              "close, so an fp16 rounding difference flips the token and the "
+              "two greedy decoders part company early.")
     print(f"report: {out_path}")
     if not summary["passed"]:
         print("PARITY FAILED — the served engine is not answering as the "

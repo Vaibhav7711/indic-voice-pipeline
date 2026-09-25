@@ -2,6 +2,13 @@
 
 Whisper-medium (1.5 GiB fp16) + Qwen3-0.6B (1.2 GiB) ≈ 2.7 GiB → concurrent on
 T4. A 7B-class LLM → sequential (offload Whisper to CPU after transcription).
+
+Qwen3-4B fp16 is ~7.5 GiB of weights plus a paged KV pool at 144 KiB per
+cached token, so it is concurrent with Whisper on a 15 GiB T4 and does not
+fit an 8 GiB card at all. When it is served by the external engine it is in
+another process and invisible to this module's snapshot: two CUDA contexts,
+no shared allocator, and the pool sized by `scripts/llm_server_app.py`
+instead. Use `--llm-model Qwen/Qwen3-0.6B` on a small card.
 """
 
 from __future__ import annotations

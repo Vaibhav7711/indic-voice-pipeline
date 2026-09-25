@@ -45,28 +45,61 @@ which covers vLLM, SGLang, llama.cpp's server, Ollama, TGI — and
 [`Vaibhav7711/full-inference-engine`](https://github.com/Vaibhav7711/full-inference-engine),
 which is what this pipeline is set up for.
 
-That engine is the right fit for a specific reason: it serves **Qwen3-0.6B**,
-which is already this pipeline's LLM, and its optimizations were each measured
-on a T4 or an RTX 4060 with interleaved A/Bs and a token-identity gate against
-stock Transformers — the same standard this repo holds itself to. Its recorded
-figures on a T4 with ~656-token chat prompts are TTFT p50 ~0.3–0.4 s and ITL
-p50 19.8 ms.
+Its optimizations were each measured on a T4 or an RTX 4060 with interleaved
+A/Bs and a token-identity gate against stock Transformers — the same standard
+this repo holds itself to. Its recorded figures on a T4 with ~656-token chat
+prompts are TTFT p50 ~0.3–0.4 s and ITL p50 19.8 ms, for Qwen3-0.6B.
+
+### The model: Qwen3-4B
+
+The default is now **Qwen3-4B**, served by the engine. Its geometry clears the
+paged kernels' constraints — 36 layers, 32 query heads, 8 KV heads, head
+dimension 128, so under the 128 limit, a multiple of 8, GQA divisible, no
+sliding window, not MLA — and it loads through `create_app` on a single GPU.
+
+Three facts to hold together when reading any result from it:
+
+| | |
+| --- | --- |
+| **VRAM** | ~7.5 GiB weights + 144 KiB per cached KV token. `scripts/llm_server_app.py` defaults to a 512 × 16 = 8192-token pool (1.125 GiB) rather than the engine's 1024 × 16 (2.25 GiB), because a voice agent is one stream with an ≤800-token prompt. Fits a 15 GB T4 beside Whisper; **does not fit an 8 GB card** in fp16 — use `--llm-model Qwen/Qwen3-0.6B` or a quantized path there. |
+| **Latency, measured** | The T4 bake-off measured first-sentence p50 at **1744 ms for 0.6B and 3553 ms for 4B** on the explicit runner. Moving to 4B therefore roughly doubles the metric this project is trying to reduce, *unless* the engine recovers more than 2×. That is the bet, and it is what the pre-registered sweep tests. |
+| **Speculative decoding is not available here** | The mechanism that could most plausibly pay for 4B's decode cost — a 0.6B draft — needs two GPUs: `create_app` raises when target and draft share a device, and the profile for it is `create_kaggle_t4x2_speculative_app`. The engine's own record also notes the 0.6B drafter did not beat target-only on the measured T4. So on one card, 4B's win has to come from CUDA-graphed decode and chunked prefill alone. |
+
+**On token agreement.** A greedy decoder diverges at the first step where two
+implementations rank the top two candidates differently, so agreement tracks
+how confident the model is per step. A small model has flatter logits and
+smaller top-two margins, so an fp16 rounding difference flips a tie more
+readily and the shared prefix is shorter. Low agreement at 0.6B is weak
+evidence of an engine defect and strong evidence of a near-tie. That is a good
+reason to prefer a larger model for a parity gate to be *informative* — and
+`scripts/engine_parity.py` now reports mean shared-prefix fraction so the
+comparison across checkpoints is a number rather than an impression. It is not
+on its own a reason to expect 4B to be faster.
 
 ### Start it, then point the agent at it
 
 ```bash
 # terminal 1 — waits for warmup, then prints the base url
-python scripts/serve_llm.py --engine-root ../full-inference-engine \
-    --app engine.server.api:create_app
+python scripts/serve_llm.py --engine-root ../full-inference-engine
 
 # terminal 2
 python scripts/live_agent.py --llm-engine http \
     --llm-base-url http://127.0.0.1:8000/v1
 ```
 
-Use `--app engine.server.api:create_rtx4060_flash_app` on an 8 GB Ada card;
-that profile's Flash prefill and 256-token pages were chosen by an A/B on that
-architecture (prefill step −7.8%, ITL p99 −22.6%).
+The default `--app` is `scripts/llm_server_app.py`, this repo's factory: it
+takes `--model`, `--num-blocks`, `--block-size`, `--max-active` and
+`--graph-buckets`, and prints the pool's cost in GiB before allocating it, so
+an out-of-memory death is a number someone chose rather than a surprise.
+
+The engine's own profiles stay available and are the better choice on an
+architecture they were measured on — `--app
+engine.server.api:create_rtx4060_flash_app` on an 8 GB Ada card, whose Flash
+prefill and 256-token pages were chosen by an A/B there (prefill step −7.8%,
+ITL p99 −22.6%). Those are zero-argument factories on purpose, so passing
+`--model` alongside one is refused rather than ignored: a recorded
+configuration that disagrees with the served one is the failure this launcher
+exists to prevent.
 
 **Wait for `/ready`, not `/health`.** The engine captures CUDA graphs and JITs
 Triton kernels at startup and answers 503 on `/ready` until that finishes.
@@ -90,17 +123,28 @@ and would not error either.
 
 ### VRAM, on one card
 
-`pipeline/memory.py` has the budget. Whisper-medium fp16 is 1.5 GiB and
-Qwen3-0.6B fp16 is 1.2 GiB, and two processes mean two CUDA contexts
+`pipeline/memory.py` has the budget. Two processes mean two CUDA contexts
 (~300 MiB each) plus no shared allocator. That cost is accepted deliberately:
 the engine needs to own its block pool and graph memory without the ASR
 allocator fragmenting it underneath.
 
+| on a 15 GB T4 | GiB |
+| --- | ---: |
+| Qwen3-4B fp16 weights | ~7.5 |
+| KV pool, 512 × 16 = 8192 tokens at 144 KiB | 1.125 |
+| Whisper-medium fp16, other process | 1.5 |
+| two CUDA contexts | ~0.6 |
+| **subtotal, before graphs and activations** | **~10.7** |
+
+Graph capture costs memory per bucket, so the default buckets are `(1, 2)`
+with `max_active=2` — one in-flight request, plus one so a barge-in's
+replacement turn does not queue behind the request it cancelled.
+
 Size the KV pool with `num_blocks × block_size` = total KV tokens across all
-concurrent requests. A voice agent is **one** stream with an ≤800-token
-prompt, so the 1024 × 16 = 16384-token default is ~20× more than needed; the
-`create_rtx4060_flash_app` profile's 64 × 256 is the same capacity in pages
-FlashAttention-2 can use.
+concurrent requests. `scripts/llm_server_app.py` prints the arithmetic, and
+reports `None` rather than a plausible figure for a checkpoint whose geometry
+it does not have recorded — a made-up VRAM number is worse than none, because
+it gets acted on.
 
 ## Before a fast tier's numbers count
 

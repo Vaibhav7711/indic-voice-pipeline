@@ -82,8 +82,13 @@ class TestComparison:
 
 
 class TestSummary:
-    def _result(self, *, agreed, identical=False):
-        return {"comparison": {"agreed": agreed, "identical": identical}}
+    def _result(self, *, agreed, identical=False, shared=30, reference=40):
+        # Mirrors what `compare()` returns, fields included: a stub that omits
+        # them lets a change to the summary pass its own tests while failing
+        # on real input.
+        return {"comparison": {"agreed": agreed, "identical": identical,
+                               "shared_prefix_chars": shared,
+                               "reference_chars": reference}}
 
     def test_all_agreeing_passes(self):
         summary = summarize([self._result(agreed=True, identical=True)] * 5)
@@ -111,3 +116,46 @@ class TestSummary:
         assert summary["passed"] is False
         assert summary["agreed"] is None
         assert summary["identical"] is None
+
+
+class TestAgreementStatistics:
+    """Agreement as a number, not just a verdict.
+
+    A greedy decoder diverges at the first step where two implementations rank
+    the top two candidates differently, so agreement tracks per-step
+    confidence. A small model has flatter logits and smaller top-two margins,
+    so an fp16 rounding difference flips a tie readily. That makes the shared
+    fraction the figure to compare across checkpoints, and a bare "they
+    disagreed" close to useless.
+    """
+
+    def _result(self, shared, reference, *, agreed=True):
+        return {"comparison": {"agreed": agreed, "identical": shared == reference,
+                               "shared_prefix_chars": shared,
+                               "reference_chars": reference}}
+
+    def test_the_shared_fraction_is_reported(self):
+        summary = summarize([self._result(20, 40), self._result(40, 40)])
+        assert summary["mean_shared_prefix_chars"] == 30.0
+        assert summary["mean_shared_fraction"] == 0.75
+
+    def test_a_confident_model_agrees_for_longer(self):
+        """The comparison this figure exists to make."""
+        small = summarize([self._result(8, 40)] * 4)
+        large = summarize([self._result(36, 40)] * 4)
+        assert large["mean_shared_fraction"] > small["mean_shared_fraction"]
+
+    def test_an_empty_reference_is_skipped_rather_than_dividing_by_zero(self):
+        summary = summarize([self._result(0, 0, agreed=False), self._result(20, 40)])
+        assert summary["mean_shared_fraction"] == 0.5
+        assert summary["prompts"] == 2
+
+    def test_all_references_empty_reports_none(self):
+        summary = summarize([self._result(0, 0, agreed=False)])
+        assert summary["mean_shared_fraction"] is None
+        assert summary["passed"] is False
+
+    def test_an_empty_run_reports_none_for_both(self):
+        summary = summarize([])
+        assert summary["mean_shared_prefix_chars"] is None
+        assert summary["mean_shared_fraction"] is None

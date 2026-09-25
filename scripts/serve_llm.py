@@ -11,12 +11,14 @@ Warmup is a startup cost, not a serving cost, and this script is where the
 distinction is enforced.
 
 Built for `Vaibhav7711/full-inference-engine` -- paged KV cache, continuous
-batching, CUDA-graphed decode, a measured per-architecture backend policy, and
-Qwen3-0.6B, which is the model this pipeline already serves. It works with any
-server exposing `/v1/completions` with `stream: true`; only `--app` and the
-readiness path are engine-specific, and both are flags.
+batching, CUDA-graphed decode, and a measured per-architecture backend policy.
+It works with any server exposing `/v1/completions` with `stream: true`; only
+`--app` and the readiness path are engine-specific, and both are flags.
 
-    # one card, the profile measured on it
+    # default: this repo's factory, Qwen3-4B with a pool sized for one stream
+    python scripts/serve_llm.py --engine-root ../full-inference-engine
+
+    # a profile the engine A/B-ed on a specific architecture, as shipped
     python scripts/serve_llm.py --engine-root ../full-inference-engine \
         --app engine.server.api:create_rtx4060_flash_app
 
@@ -25,17 +27,17 @@ readiness path are engine-specific, and both are flags.
         --llm-base-url http://127.0.0.1:8000/v1
 
 **Why a separate process, on one GPU.** Whisper-medium fp16 (1.5 GiB) plus
-Qwen3-0.6B fp16 (1.2 GiB) plus the engine's paged KV blocks share one card.
+Qwen3-4B fp16 (~7.5 GiB) plus the engine's paged KV blocks share one card.
 Two processes mean two CUDA contexts (~300 MiB each) and no shared allocator,
 which is a real cost -- but it is the only arrangement where the engine owns
 its own block pool and graph memory without the ASR allocator fragmenting it
-underneath. `pipeline/memory.py` has the budget; `--num-blocks` is the knob
-that fits it.
+underneath. `pipeline/memory.py` has the budget.
 
 Blocks are the thing to size: `num_blocks * block_size` is the total KV token
-capacity across all concurrent requests. A voice agent is one stream, so the
-default 1024x16 = 16384 tokens is roughly 20x more than a 800-token dialogue
-history needs.
+capacity across all concurrent requests. At Qwen3-4B's 144 KiB per cached
+token the engine's 1024x16 default costs 2.25 GiB; a voice agent is one
+stream with an <=800-token prompt, so `scripts/llm_server_app.py` defaults to
+512x16 = 8192 tokens (1.125 GiB) and prints the arithmetic before allocating.
 """
 
 from __future__ import annotations
@@ -50,7 +52,10 @@ import time
 import urllib.error
 import urllib.request
 
-DEFAULT_APP = "engine.server.api:create_app"
+#: This repo's configurable factory, so a model and a pool size can be chosen.
+#: The engine's own zero-argument profiles stay available through `--app`, and
+#: are the right choice on an architecture they were measured on.
+DEFAULT_APP = "scripts.llm_server_app:create"
 DEFAULT_PORT = 8000
 
 
@@ -130,9 +135,32 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--engine-root", default=os.getenv("LLM_ENGINE_ROOT"),
                         help="checkout of the serving engine; prepended to PYTHONPATH")
     parser.add_argument("--app", default=DEFAULT_APP,
-                        help=f"uvicorn --factory target (default {DEFAULT_APP}). "
-                             "Prefer a factory measured on this GPU, e.g. "
-                             "engine.server.api:create_rtx4060_flash_app")
+                        help=f"uvicorn --factory target (default {DEFAULT_APP}, "
+                             "this repo's env-configured factory). Use "
+                             "engine.server.api:create_rtx4060_flash_app to serve "
+                             "a profile that was A/B-ed on that architecture; the "
+                             "--model and pool flags below are then ignored, "
+                             "because that is the point of those profiles")
+    parser.add_argument("--model", default=None,
+                        help="checkpoint to serve (default: the factory's own). "
+                             "Qwen3-4B fp16 needs ~7.5 GiB of weights, so it fits "
+                             "a 15 GB T4 beside Whisper but not an 8 GB card")
+    parser.add_argument("--num-blocks", type=int, default=None,
+                        help="paged KV blocks. num_blocks x block_size is the KV "
+                             "token capacity across all concurrent requests; a "
+                             "voice agent is one stream with an <=800-token prompt")
+    parser.add_argument("--block-size", type=int, default=None,
+                        help="tokens per page; FlashAttention-2 paged KV needs 256")
+    parser.add_argument("--max-active", type=int, default=None)
+    parser.add_argument("--graph-buckets", default=None,
+                        help="comma-separated batch sizes to capture graphs for; "
+                             "each costs memory, and buckets above --max-active "
+                             "are dropped")
+    parser.add_argument("--dtype", default=None, help="float16 / bfloat16 / auto")
+    parser.add_argument("--decode-attention", default=None,
+                        help="named backend; the engine raises with a reason "
+                             "rather than falling back if it cannot run here")
+    parser.add_argument("--prefill-attention", default=None)
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=DEFAULT_PORT)
     parser.add_argument("--ready-path", default="/ready",
@@ -152,6 +180,26 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     environment = dict(os.environ)
+    overrides = {
+        "LLM_SERVER_MODEL": args.model,
+        "LLM_SERVER_NUM_BLOCKS": args.num_blocks,
+        "LLM_SERVER_BLOCK_SIZE": args.block_size,
+        "LLM_SERVER_MAX_ACTIVE": args.max_active,
+        "LLM_SERVER_GRAPH_BUCKETS": args.graph_buckets,
+        "LLM_SERVER_DTYPE": args.dtype,
+        "LLM_SERVER_DECODE_ATTENTION": args.decode_attention,
+        "LLM_SERVER_PREFILL_ATTENTION": args.prefill_attention,
+    }
+    chosen = {name: str(value) for name, value in overrides.items() if value is not None}
+    if chosen and args.app != DEFAULT_APP:
+        # Silently ignoring them would mean the recorded configuration and the
+        # served one disagree, which is the failure this whole file is about.
+        parser.error(
+            f"--app {args.app} is a zero-argument factory and cannot receive "
+            f"{sorted(chosen)}. Either drop those flags, or use the default "
+            f"factory ({DEFAULT_APP}) which reads them.",
+        )
+    environment.update(chosen)
     if args.engine_root:
         root = os.path.abspath(os.path.expanduser(args.engine_root))
         if not os.path.isdir(root):
@@ -161,6 +209,14 @@ def main(argv: list[str] | None = None) -> int:
 
     command = server_command(args.app, port=args.port, host=args.host, extra=args.extra)
     print("starting:", " ".join(command), flush=True)
+    if chosen:
+        print("configuration:", chosen, flush=True)
+    if args.app == DEFAULT_APP:
+        from scripts.llm_server_app import describe, resolve_config
+
+        # Printed before the allocation, so an out-of-memory death is a number
+        # someone chose rather than a surprise.
+        print("memory:", describe(resolve_config(environment)), flush=True)
     process = subprocess.Popen(command, env=environment)
     try:
         body = wait_until_ready(base, timeout_s=args.ready_timeout, path=args.ready_path,

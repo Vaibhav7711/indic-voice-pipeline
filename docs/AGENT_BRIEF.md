@@ -240,6 +240,7 @@ reinterpreted into a success. Apply literally.
 | CTranslate2 engine | `ct2_matches_explicit` passes (token-identical at fp16, ≤ 5% WER apart at int8) **and** speedup > 1.3× | keep the explicit runner |
 | Compiled decode | tokens match **and** speedup > 1.1× | keep it off; the T4 measured 0.9× |
 | Served LLM engine | `scripts/engine_parity.py` exits 0 **and** p50 transcript → first audio improves > 1.1× | keep the explicit runner, record the measured ratio |
+| Qwen3-4B as the default LLM | served-4B p50 transcript → first audio is at or below the 0.6B baseline arm | revert to 0.6B, or retain 4B only on a recorded human quality judgement — never on latency, which measured 3553 ms vs 1744 ms first-sentence p50 on the explicit runner |
 | `max_history_tokens` 800 → 200 | first-token p50 improves ≥ 200 ms **and** a cross-turn referring expression still resolves | keep 800; latency bought by forgetting the conversation is not a win |
 | `max_unit_chars` 60 → 30 | first-unit p50 improves ≥ 300 ms **and** human listening accepts the clause break | keep 60, record the measured gain as available-but-unclaimed |
 

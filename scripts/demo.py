@@ -11,7 +11,7 @@ import torch
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--whisper-model", default="openai/whisper-medium")
-    parser.add_argument("--llm-model", default="Qwen/Qwen3-0.6B")
+    parser.add_argument("--llm-model", default="Qwen/Qwen3-4B")
     parser.add_argument("--adapter", default=None, help="Path to a PEFT LoRA adapter")
     args = parser.parse_args()
 

@@ -549,7 +549,50 @@ those records omit their configuration — so the sweep's own baseline arm, not
 those 12 turns, is the comparison. The predictions below are stated in advance
 precisely so that being wrong is visible.
 
-**Served LLM engine (`full-inference-engine`, Qwen3-0.6B).** The candidate is
+**Model change: Qwen3-0.6B → Qwen3-4B (registered 2026-09-25).** The default
+LLM is now Qwen3-4B, served by the engine. The reasons and the counter-evidence
+are both recorded here, before the run, because they point in opposite
+directions.
+
+*For:* answer quality, and a parity gate that is informative. A greedy decoder
+diverges at the first step where two implementations rank the top two
+candidates differently, so token agreement tracks per-step confidence. A 0.6B
+model has flatter logits and smaller top-two margins, so an fp16 rounding
+difference flips a tie readily and two correct implementations part company
+early. Low agreement at 0.6B is weak evidence of an engine defect. A larger
+model makes the gate mean something.
+
+*Against, from this project's own measurements:* the T4 bake-off measured
+first-sentence p50 at **1744 ms for 0.6B and 3553 ms for 4B** on the explicit
+runner, and Devanagari ratio 1.000 versus 0.988. So on the metric this whole
+sweep exists to reduce, 4B starts about 2× worse, and it was very slightly
+worse on script purity too.
+
+*What has to be true for the change to pay:* the engine must recover more than
+2× on 4B relative to the explicit runner at 0.6B. On a single card it has to
+do that with CUDA-graphed decode and chunked prefill alone — speculative
+decoding, the mechanism that would most plausibly cover 4B's decode cost,
+requires two GPUs (`create_app` refuses a shared target/draft device) and the
+engine's own record notes the 0.6B drafter did not beat target-only on a T4.
+
+- *Decision rule:* keep Qwen3-4B as the default if the served-4B arm's p50
+  transcript → first audio is **at or below** the 0.6B baseline arm's. If 4B
+  is slower, it is retained only on an explicit quality judgement made by a
+  human listening to both, recorded as such — not on latency, which will have
+  said the opposite. If neither holds, revert to 0.6B and record the measured
+  cost of 4B.
+- *Required arms:* the sweep must therefore run **both** checkpoints, not just
+  the new default. An A/B that changes the model and the engine at once cannot
+  attribute the difference to either.
+- *Prediction:* 4B on the engine lands between the two explicit figures —
+  faster than 3553 ms, slower than 1744 ms. If so, the rule reverts to 0.6B
+  and the 4B decision becomes a quality question with a known latency price.
+- *VRAM, recorded in advance:* ~7.5 GiB weights + 1.125 GiB for a 512 × 16
+  pool at 144 KiB/token + 1.5 GiB Whisper in the other process + ~0.6 GiB of
+  CUDA contexts ≈ 10.7 GiB before graphs and activations. Fits a 15 GB T4.
+  Does **not** fit an 8 GB card in fp16, so the RTX 4060 path stays on 0.6B.
+
+**Served LLM engine (`full-inference-engine`).** The candidate is
 an OpenAI-compatible server with a paged KV cache, continuous batching and
 CUDA-graphed decode, whose own T4 record is TTFT p50 ~0.3–0.4 s and ITL p50
 19.8 ms at ~656-token prompts. The explicit runner measured 877.9 ms mean to

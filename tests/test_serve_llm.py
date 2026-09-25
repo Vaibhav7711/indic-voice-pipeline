@@ -15,7 +15,7 @@ import sys
 
 import pytest
 
-from scripts.serve_llm import server_command, wait_until_ready
+from scripts.serve_llm import DEFAULT_APP, main, server_command, wait_until_ready
 
 
 class FakeProcess:
@@ -118,3 +118,51 @@ def test_the_script_runs_without_the_engine_installed():
                             capture_output=True, text=True, timeout=60)
     assert result.returncode == 0
     assert "--engine-root" in result.stdout and "--ready-timeout" in result.stdout
+
+
+class TestFactoryFlagGuard:
+    """The engine's own profiles are zero-argument on purpose: a configuration
+    A/B-ed on an architecture cannot then drift. So passing --model alongside
+    one has to be refused, not ignored -- a recorded configuration that
+    disagrees with the served one is the failure this launcher exists to
+    prevent."""
+
+    def test_model_with_a_zero_argument_profile_is_refused(self, capsys):
+        with pytest.raises(SystemExit):
+            main(["--app", "engine.server.api:create_rtx4060_flash_app",
+                  "--model", "Qwen/Qwen3-4B"])
+        assert "cannot receive" in capsys.readouterr().err
+
+    def test_the_refusal_names_the_factory_that_would_work(self, capsys):
+        with pytest.raises(SystemExit):
+            main(["--app", "engine.server.api:create_app", "--num-blocks", "512"])
+        assert DEFAULT_APP in capsys.readouterr().err
+
+    def test_a_zero_argument_profile_alone_is_accepted(self, monkeypatch):
+        """No pool flags, so nothing to disagree about. It should get as far as
+        trying to start a server, which is where this test stops it."""
+        started = {}
+
+        def fake_popen(command, env=None):
+            started["command"] = command
+            raise KeyboardInterrupt        # stop before a real uvicorn runs
+
+        monkeypatch.setattr("scripts.serve_llm.subprocess.Popen", fake_popen)
+        with pytest.raises(KeyboardInterrupt):
+            main(["--app", "engine.server.api:create_rtx4060_flash_app"])
+        assert "engine.server.api:create_rtx4060_flash_app" in started["command"]
+
+    def test_the_default_factory_accepts_the_pool_flags(self, monkeypatch):
+        captured = {}
+
+        def fake_popen(command, env=None):
+            captured["env"] = env
+            raise KeyboardInterrupt
+
+        monkeypatch.setattr("scripts.serve_llm.subprocess.Popen", fake_popen)
+        with pytest.raises(KeyboardInterrupt):
+            main(["--model", "Qwen/Qwen3-4B", "--num-blocks", "512",
+                  "--graph-buckets", "1,2"])
+        assert captured["env"]["LLM_SERVER_MODEL"] == "Qwen/Qwen3-4B"
+        assert captured["env"]["LLM_SERVER_NUM_BLOCKS"] == "512"
+        assert captured["env"]["LLM_SERVER_GRAPH_BUCKETS"] == "1,2"
