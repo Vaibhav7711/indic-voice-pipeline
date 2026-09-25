@@ -87,6 +87,20 @@ def percentile(values: list[float], fraction: float) -> float | None:
     return ordered[index]
 
 
+def metrics_of(record: dict) -> dict:
+    """The metrics block of a turn record, wherever it lives.
+
+    `TurnResult.as_dict()` nests them under "metrics", which is the shape
+    `results/live/turns.jsonl` is already in and so the shape this script
+    writes. Reading the latencies off the top level instead finds nothing,
+    every field reports `None`, and the A/B looks like it ran and measured
+    a pipeline that produces no audio. Hence one function, used by both the
+    driver and the summary.
+    """
+    nested = record.get("metrics")
+    return nested if isinstance(nested, dict) else record
+
+
 def summarize(records: list[dict]) -> dict:
     """Per-arm distribution of the latencies this project reports.
 
@@ -97,18 +111,19 @@ def summarize(records: list[dict]) -> dict:
     """
     fields = ("response_latency_ms", "final_transcript_to_first_llm_token_ms",
               "first_token_to_first_unit_ms", "tts_synthesis_ms", "total_turn_ms")
+    blocks = [metrics_of(record) for record in records]
     summary: dict = {"turns": len(records)}
     for field in fields:
-        values = [r[field] for r in records
-                  if isinstance(r.get(field), (int, float))]
+        values = [block[field] for block in blocks
+                  if isinstance(block.get(field), (int, float))]
         summary[field] = {
             "n": len(values),
             "p50": percentile(values, 0.5),
             "p90": percentile(values, 0.9),
             "mean": statistics.fmean(values) if values else None,
         }
-    tokens = [r["llm_generated_tokens"] for r in records
-              if isinstance(r.get("llm_generated_tokens"), int)]
+    tokens = [block["llm_generated_tokens"] for block in blocks
+              if isinstance(block.get("llm_generated_tokens"), int)]
     summary["mean_generated_tokens"] = statistics.fmean(tokens) if tokens else None
     return summary
 
@@ -242,7 +257,7 @@ def main(argv: list[str] | None = None) -> int:
                 records[name].append(record)
                 sink.write(json.dumps(record, ensure_ascii=False) + "\n")
                 sink.flush()
-                latency = record.get("response_latency_ms")
+                latency = metrics_of(record).get("response_latency_ms")
                 shown = f"{latency:7.1f} ms" if isinstance(latency, (int, float)) else "     n/a"
                 print(f"round {index + 1}/{args.rounds}  {name:<14} {shown}", flush=True)
 

@@ -9,7 +9,14 @@ from __future__ import annotations
 
 import pytest
 
-from scripts.latency_ab import KNOBS, build_arm, parse_arm, percentile, summarize
+from scripts.latency_ab import (
+    KNOBS,
+    build_arm,
+    metrics_of,
+    parse_arm,
+    percentile,
+    summarize,
+)
 
 
 class TestArmParsing:
@@ -143,3 +150,38 @@ class TestArmConstruction:
             build_arm({"llm_engine": "http"}, base=self._base(),
                       generators=self._generators(), synth=object(),
                       sink_factory=lambda: None)
+
+
+class TestRecordShape:
+    """`TurnResult.as_dict()` nests the metrics. Reading them off the top
+    level finds nothing, and an arm that measured fine reports every latency
+    as `None` -- which looks like a pipeline that produced no audio rather
+    than like a bug in the reader."""
+
+    def _record(self):
+        # The shape the driver writes, abbreviated: what TurnResult.as_dict()
+        # actually returns.
+        return {
+            "turn_id": "abc123", "state": "done", "transcript": "नमस्ते",
+            "response": "नमस्ते! मैं ठीक हूँ।",
+            "metrics": {"response_latency_ms": 1234.5, "total_turn_ms": 1300.0,
+                        "llm_generated_tokens": 21},
+            "speech": None, "playback": None, "error": None,
+            "arm": "baseline", "round": 0,
+        }
+
+    def test_metrics_are_found_inside_the_nested_block(self):
+        assert metrics_of(self._record())["response_latency_ms"] == 1234.5
+
+    def test_an_already_flat_metrics_dict_passes_through(self):
+        assert metrics_of({"response_latency_ms": 9.0})["response_latency_ms"] == 9.0
+
+    def test_summarize_reads_real_turn_records(self):
+        summary = summarize([self._record(), self._record()])
+        assert summary["turns"] == 2
+        assert summary["response_latency_ms"]["p50"] == 1234.5
+        assert summary["mean_generated_tokens"] == 21.0
+
+    def test_a_record_with_a_non_dict_metrics_field_does_not_crash(self):
+        record = self._record() | {"metrics": None}
+        assert summarize([record])["response_latency_ms"]["n"] == 0
