@@ -201,7 +201,6 @@ class NotebookAgent:
         llm_engine: str = "explicit",
         llm_base_url: str = "http://127.0.0.1:8000/v1",
         llm_api_key: str | None = None,
-        llm_chat_endpoint: bool = False,
         max_history_tokens: int = 800,
     ):
         self.language = language
@@ -210,7 +209,6 @@ class NotebookAgent:
                        "asr_engine": asr_engine, "ct2_model": ct2_model,
                        "ct2_compute_type": ct2_compute_type,
                        "llm_engine": llm_engine, "llm_base_url": llm_base_url,
-                       "llm_chat_endpoint": llm_chat_endpoint,
                        "max_history_tokens": max_history_tokens}
         self.llm_api_key = llm_api_key
         self.llm_info: dict = {}
@@ -239,7 +237,6 @@ class NotebookAgent:
         self.llm_runner, tokenizer, self.llm_info = build_llm(
             cfg["llm_engine"], model=cfg["llm"], device=cfg["device"],
             base_url=cfg["llm_base_url"], api_key=self.llm_api_key,
-            chat=cfg["llm_chat_endpoint"],
         )
         self._tokenizer = tokenizer
         if cfg["llm_engine"] == "http":

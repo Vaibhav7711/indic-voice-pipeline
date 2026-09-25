@@ -1,0 +1,194 @@
+"""Start an OpenAI-compatible LLM server and wait until it is actually ready.
+
+The agent turn reaches a serving engine through `--llm-engine http`
+(`llm/engines/http_engine.py`). Something has to start that engine, and the
+"something" cannot be a bare `uvicorn ... &` for one reason: an engine that
+captures CUDA graphs and JITs Triton kernels at startup answers `503` on
+`/ready` until warmup finishes, which on a cold cache is tens of seconds. A
+pipeline that starts talking to it immediately records a first turn several
+seconds slower than the steady state and then averages that into a benchmark.
+Warmup is a startup cost, not a serving cost, and this script is where the
+distinction is enforced.
+
+Built for `Vaibhav7711/full-inference-engine` -- paged KV cache, continuous
+batching, CUDA-graphed decode, a measured per-architecture backend policy, and
+Qwen3-0.6B, which is the model this pipeline already serves. It works with any
+server exposing `/v1/completions` with `stream: true`; only `--app` and the
+readiness path are engine-specific, and both are flags.
+
+    # one card, the profile measured on it
+    python scripts/serve_llm.py --engine-root ../full-inference-engine \
+        --app engine.server.api:create_rtx4060_flash_app
+
+    # then, in another process
+    python scripts/live_agent.py --llm-engine http \
+        --llm-base-url http://127.0.0.1:8000/v1
+
+**Why a separate process, on one GPU.** Whisper-medium fp16 (1.5 GiB) plus
+Qwen3-0.6B fp16 (1.2 GiB) plus the engine's paged KV blocks share one card.
+Two processes mean two CUDA contexts (~300 MiB each) and no shared allocator,
+which is a real cost -- but it is the only arrangement where the engine owns
+its own block pool and graph memory without the ASR allocator fragmenting it
+underneath. `pipeline/memory.py` has the budget; `--num-blocks` is the knob
+that fits it.
+
+Blocks are the thing to size: `num_blocks * block_size` is the total KV token
+capacity across all concurrent requests. A voice agent is one stream, so the
+default 1024x16 = 16384 tokens is roughly 20x more than a 800-token dialogue
+history needs.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import signal
+import subprocess
+import sys
+import time
+import urllib.error
+import urllib.request
+
+DEFAULT_APP = "engine.server.api:create_app"
+DEFAULT_PORT = 8000
+
+
+def probe(url: str, timeout: float = 2.0) -> tuple[int, dict | str]:
+    """GET `url`, returning (status, parsed body). A 503 body is diagnostic.
+
+    This engine's `/ready` returns the service snapshot alongside the status,
+    so a server that is still loading says so rather than just refusing.
+    """
+    try:
+        with urllib.request.urlopen(url, timeout=timeout) as response:
+            body = response.read().decode("utf-8", "replace")
+            status = response.status
+    except urllib.error.HTTPError as error:
+        status = error.code
+        try:
+            body = error.read().decode("utf-8", "replace")
+        except OSError:
+            body = ""
+    except (urllib.error.URLError, OSError) as error:
+        return 0, f"{type(error).__name__}: {error}"
+    try:
+        return status, json.loads(body)
+    except ValueError:
+        return status, body
+
+
+def wait_until_ready(base: str, *, timeout_s: float, path: str = "/ready",
+                     process: subprocess.Popen | None = None,
+                     interval_s: float = 1.0, log=print) -> dict:
+    """Poll until the server reports ready, or the deadline passes.
+
+    Returns the readiness body. Raises `RuntimeError` on timeout, or as soon as
+    the server process exits -- polling a dead process until the deadline turns
+    a crash on startup (a missing Triton wheel, an unsupported head geometry,
+    which this engine refuses at load *with the reason*) into a slow, silent
+    failure.
+    """
+    url = f"{base.rstrip('/')}{path}"
+    deadline = time.monotonic() + timeout_s
+    waited = 0.0
+    while True:
+        if process is not None and process.poll() is not None:
+            raise RuntimeError(
+                f"the server exited with code {process.returncode} during warmup; "
+                f"its output above says why",
+            )
+        status, body = probe(url)
+        if status == 200:
+            log(f"ready after {waited:.1f}s: {body}")
+            return body if isinstance(body, dict) else {"status": "ready"}
+        if time.monotonic() >= deadline:
+            raise RuntimeError(
+                f"{url} did not report ready within {timeout_s:.0f}s; "
+                f"last status {status}, body {body!r}",
+            )
+        if waited and waited % 10 < interval_s:
+            log(f"  waiting for warmup ({waited:.0f}s): status {status}, {body!r}")
+        time.sleep(interval_s)
+        waited += interval_s
+
+
+def server_command(app: str, *, port: int, host: str, extra: list[str]) -> list[str]:
+    """`uvicorn --factory`, because the engine's app factories take no arguments.
+
+    The measured profiles (`create_rtx4060_flash_app`, and the T4 x2
+    speculative one) are zero-argument factories precisely so a serving
+    configuration that was A/B-ed on a device cannot drift from what is run.
+    Pass `--app` to pick one; do not hand-assemble its arguments here.
+    """
+    return [sys.executable, "-m", "uvicorn", app, "--factory",
+            "--host", host, "--port", str(port), *extra]
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+    parser.add_argument("--engine-root", default=os.getenv("LLM_ENGINE_ROOT"),
+                        help="checkout of the serving engine; prepended to PYTHONPATH")
+    parser.add_argument("--app", default=DEFAULT_APP,
+                        help=f"uvicorn --factory target (default {DEFAULT_APP}). "
+                             "Prefer a factory measured on this GPU, e.g. "
+                             "engine.server.api:create_rtx4060_flash_app")
+    parser.add_argument("--host", default="127.0.0.1")
+    parser.add_argument("--port", type=int, default=DEFAULT_PORT)
+    parser.add_argument("--ready-path", default="/ready",
+                        help="readiness route; /health is liveness and answers sooner")
+    parser.add_argument("--ready-timeout", type=float, default=600.0,
+                        help="graph capture and Triton JIT on a cold cache are slow")
+    parser.add_argument("--wait-only", action="store_true",
+                        help="do not start a server; just wait on one already running")
+    parser.add_argument("--uvicorn-arg", action="append", default=[],
+                        dest="extra", help="passed through to uvicorn; repeatable")
+    args = parser.parse_args(argv)
+
+    base = f"http://{args.host}:{args.port}"
+    if args.wait_only:
+        wait_until_ready(base, timeout_s=args.ready_timeout, path=args.ready_path)
+        print(f"base url: {base}/v1")
+        return 0
+
+    environment = dict(os.environ)
+    if args.engine_root:
+        root = os.path.abspath(os.path.expanduser(args.engine_root))
+        if not os.path.isdir(root):
+            parser.error(f"--engine-root {root} is not a directory")
+        existing = environment.get("PYTHONPATH")
+        environment["PYTHONPATH"] = f"{root}{os.pathsep}{existing}" if existing else root
+
+    command = server_command(args.app, port=args.port, host=args.host, extra=args.extra)
+    print("starting:", " ".join(command), flush=True)
+    process = subprocess.Popen(command, env=environment)
+    try:
+        body = wait_until_ready(base, timeout_s=args.ready_timeout, path=args.ready_path,
+                                process=process)
+    except (RuntimeError, KeyboardInterrupt) as error:
+        process.send_signal(signal.SIGINT)
+        try:
+            process.wait(timeout=30)
+        except subprocess.TimeoutExpired:
+            process.kill()
+        print(f"error: {error}", file=sys.stderr)
+        return 1
+
+    print(f"base url: {base}/v1 -- point the agent at it with "
+          f"--llm-engine http --llm-base-url {base}/v1", flush=True)
+    print(f"readiness: {body}", flush=True)
+    try:
+        return process.wait()
+    except KeyboardInterrupt:
+        # Drain rather than kill: the engine finishes in-flight requests and
+        # reports 503 on /ready while it does.
+        process.send_signal(signal.SIGINT)
+        try:
+            return process.wait(timeout=60)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

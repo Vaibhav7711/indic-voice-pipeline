@@ -211,6 +211,7 @@ class VoiceTurn:
         system_prompt: str | None = None,
         response_language: str = "hi",
         split_into_sentences: bool = True,
+        max_unit_chars: int = 60,
         llm_max_tokens: int = 128,
         conversation=None,
         clock=None,
@@ -221,6 +222,13 @@ class VoiceTurn:
         self.system_prompt = system_prompt
         self.response_language = response_language
         self.split_into_sentences = split_into_sentences
+        #: Longest unit sent to synthesis before it is cut at a clause
+        #: boundary. It sets how long the user waits for the *first* audio:
+        #: the measured first unit was 41.2 characters at ~61 ms each, so the
+        #: cap and the silence before speech are the same number. Injectable
+        #: because it is the cheapest latency knob in the pipeline and so has
+        #: to be A/B-able without editing this file (`scripts/latency_ab.py`).
+        self.max_unit_chars = max_unit_chars
         self.llm_max_tokens = llm_max_tokens
         #: Optional :class:`agent.conversation.Conversation`. When present the
         #: prompt carries the dialogue history and each completed turn is
@@ -355,7 +363,8 @@ class VoiceTurn:
 
         def produce():
             """Audio chunks, driven by LLM deltas through the sentence buffer."""
-            buffer = SentenceBuffer(enabled=self.split_into_sentences)
+            buffer = SentenceBuffer(enabled=self.split_into_sentences,
+                                    max_unit_chars=self.max_unit_chars)
             prompt = self.build_prompt(transcript)
             try:
                 for piece in self._llm_deltas(prompt, metrics, playback, marks):

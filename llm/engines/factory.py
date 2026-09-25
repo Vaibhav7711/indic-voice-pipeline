@@ -86,7 +86,13 @@ def build_llm(
 
     ``chat`` defaults to False for the HTTP engine on purpose: the turn has
     already rendered the model's chat template, and letting the server apply
-    its own on top would double-wrap the prompt.
+    its own on top would double-wrap the prompt. With a Qwen3 tokenizer that
+    is not merely redundant -- a server template rendered without
+    ``enable_thinking=False`` re-enables thinking, so the model fills its
+    budget with ``<think>`` and there is nothing to speak. That failure is
+    what :mod:`llm.prompting` exists to prevent, and it would reappear
+    silently, as a quality problem rather than a serving bug, so the
+    combination is refused here.
     """
     if engine not in LLM_ENGINES:
         raise ValueError(f"llm engine must be one of {LLM_ENGINES}, got {engine!r}")
@@ -94,7 +100,17 @@ def build_llm(
     if engine == "http":
         from llm.engines import HttpLLMEngine
 
-        if tokenizer is None:
+        if chat and tokenizer is not False:
+            raise ValueError(
+                "chat=True double-wraps the prompt: agent.turn already renders the "
+                "model's chat template via llm.prompting (with enable_thinking=False "
+                "for Qwen3), so the server would template an already-templated "
+                "string. Use the /v1/completions route (chat=False). Pass "
+                "tokenizer=False only if you intend the server to own templating.",
+            )
+        if tokenizer is False:
+            tokenizer = None
+        elif tokenizer is None:
             try:
                 from transformers import AutoTokenizer
 
@@ -106,7 +122,8 @@ def build_llm(
             api_key=api_key, chat=chat, tokenizer=tokenizer, extra_body=extra_body,
         )
         return generator, tokenizer, {"engine": "http", "model": model,
-                                      "endpoint": generator.endpoint, "chat": chat}
+                                      "endpoint": generator.endpoint, "chat": chat,
+                                      "templated_by": "server" if chat else "client"}
 
     from llm import LLMRunner, load_llm
 

@@ -161,4 +161,6 @@ def test_probe_reports_reachability_and_whether_usage_is_available():
     info = engine.probe()
     assert info["reachable"] is True and info["text"] == "ठीक"
     assert info["reported_usage"] is True
-    assert info["endpoint"].endswith("/v1/chat/completions")
+    assert info["endpoint"].endswith("/v1/completions"), (
+        "completions is the default: the turn renders the chat template itself"
+    )

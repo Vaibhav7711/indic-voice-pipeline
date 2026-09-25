@@ -536,6 +536,71 @@ until a speakable unit, not TTS synthesis. The live records do not record the
 selected LLM, TTS backend, GPU, or notebook commit, so this is a real
 distribution but not a configuration-comparison result.
 
+## Pre-registered: the serving-engine and turn-latency sweep (registered 2026-09-25)
+
+Registered **before** the runs, so the rules cannot be chosen after seeing the
+numbers. Harnesses: `scripts/engine_parity.py` (correctness gate),
+`scripts/latency_ab.py` (interleaved arms on one set of loaded weights).
+Evidence to `results/engine_parity/` and `results/latency_ab/`.
+
+Every arm here is configuration, not weights. The 12 live turns in
+`results/live/turns.jsonl` are the baseline the predictions come from, and
+those records omit their configuration — so the sweep's own baseline arm, not
+those 12 turns, is the comparison. The predictions below are stated in advance
+precisely so that being wrong is visible.
+
+**Served LLM engine (`full-inference-engine`, Qwen3-0.6B).** The candidate is
+an OpenAI-compatible server with a paged KV cache, continuous batching and
+CUDA-graphed decode, whose own T4 record is TTFT p50 ~0.3–0.4 s and ITL p50
+19.8 ms at ~656-token prompts. The explicit runner measured 877.9 ms mean to
+first token and ~42 ms/token.
+
+- *Gate, before any latency is recorded:* `scripts/engine_parity.py` must exit
+  0 — every prompt agreeing on the first 24 characters. Both decoders are
+  greedy, so this is a real constraint and not a formality. A failure is
+  reported and investigated; it is not "close enough".
+- *Decision rule:* adopt the served engine as the LLM tier if parity passes
+  **and** response-latency p50 improves by ≥ 1.1× against the baseline arm.
+  Below 1.1×, keep the explicit runner — the same threshold that rejected
+  compiled decode at 0.8526× and accepted CTranslate2 at 1.3145×.
+- *Prediction:* p50 improves by more than 1.1×. If it does not, the likely
+  cause is that batch-1 single-stream serving does not benefit from continuous
+  batching, which is a throughput optimization; the win would then have to
+  come from CUDA-graphed decode and chunked prefill alone.
+- *Caveat recorded in advance:* two processes on one card cost two CUDA
+  contexts (~300 MiB each) and lose the shared allocator. If VRAM forces a
+  smaller Whisper or a smaller KV pool, that trade is part of the result.
+
+**Dialogue history budget (`max_history_tokens` 800 → 200).** `first_token_ms`
+rose 209 → 1474 ms across 12 turns, Pearson r = 0.99 against turn index.
+
+- *Decision rule:* adopt 200 if transcript-to-first-token p50 improves by
+  ≥ 200 ms **and** the assistant still resolves a referring expression across
+  turns — asked a follow-up that depends on the previous turn ("उसका मतलब
+  क्या है?"), it must not answer as if the exchange had not happened. Latency
+  bought by forgetting the conversation is not a win for a dialogue agent, and
+  no latency threshold can substitute for checking that.
+- *Prediction:* ~1.2 s at the tail of a 12-turn session, less early on. The
+  gain is not uniform: at turn 1 there is no history to trim, so an A/B over
+  few rounds will understate it. Rounds are therefore ≥ 8.
+
+**First speakable unit (`max_unit_chars` 60 → 30).** The measured first unit
+was 41.2 characters at ~61 ms each.
+
+- *Decision rule:* adopt 30 if first-token-to-first-unit p50 improves by
+  ≥ 300 ms **and** a human listening pass on ≥ 10 turns does not report the
+  clause break as unnatural. This is the same human-quality condition that
+  retained `edge` TTS; a shorter unit buys silence-to-speech by cutting the
+  sentence in a slightly odder place, and only listening settles whether that
+  is acceptable.
+- *Prediction:* ~600 ms, from 2446 ms to ~1841 ms.
+
+**What this sweep cannot settle.** Endpoint-to-final (660.8 ms mean) is the
+VAD's silence window, not compute, and no engine changes it. It is the floor
+any turn-latency figure sits on. KV-cache reuse across turns — the system
+prompt and older exchanges are a stable prefix — is the other named
+unmeasured option, and is not in this sweep.
+
 ### Measuring latency while training runs
 
 Don't. RTF, p50 and p90 measured on a GPU that is simultaneously training

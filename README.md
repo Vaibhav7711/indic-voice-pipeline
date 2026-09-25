@@ -64,6 +64,37 @@ restarting; `--mirror` copies evidence to a mounted Drive as each step
 finishes. [`notebooks/finish_colab.ipynb`](notebooks/finish_colab.ipynb) is
 that plan as a runnable notebook — open it in Colab on a T4 and work down.
 
+## Serving tiers
+
+The explicit loops are the reference; the fast tiers are selected explicitly,
+never "whichever is installed", because a serving path that changes engine
+underneath you is a serving path whose numbers cannot be compared across
+runs.
+
+```bash
+python scripts/live_agent.py --asr-engine ct2 --ct2-model models/ct2-medium-hi \
+    --llm-engine http --llm-base-url http://127.0.0.1:8000/v1
+```
+
+`--llm-engine http` serves the turn from any OpenAI-compatible streaming
+endpoint. [`Vaibhav7711/full-inference-engine`](https://github.com/Vaibhav7711/full-inference-engine)
+is the one this pipeline is set up for: it serves **Qwen3-0.6B**, already this
+pipeline's LLM, with a paged KV cache, continuous batching and CUDA-graphed
+decode, each optimization measured on a T4 or RTX 4060 against a
+token-identity gate. `scripts/serve_llm.py` starts it and waits for `/ready`
+rather than `/health`, so warmup — CUDA graph capture and Triton JIT — cannot
+land inside the first measured turn.
+
+**This is where the seconds are, and it is not where a speech pipeline's
+intuition points.** Of a 4435.5 ms p50 live turn, ASR is 342 ms *and off the
+critical path* (the candidate final is decoded during endpoint silence), while
+the LLM is 3324 ms. The CTranslate2 tier's measured 1.3145× is worth ~90 ms,
+about 2%.
+
+[`docs/SERVING.md`](docs/SERVING.md) has the full runbook: VRAM sizing, why
+the chat endpoint is refused, the parity gate, and the interleaved A/B over
+the remaining latency knobs.
+
 ## Streaming and voice-agent behaviour
 
 Streaming ASR (`asr/streaming/`) and agent output (`agent/`, `tts/streaming.py`)
@@ -497,6 +528,7 @@ endpointer's `min_silence_ms` is added on top in a live session; see
 | LLM decode | HF `model.generate()` greedy tokens |
 | LLM static-cache / compiled decode | Explicit eager decode, token-identical (`llm_compiled_matches_eager`) |
 | CTranslate2 engine | Explicit runner: token-identical at fp16/fp32, ≤ 5% WER apart at int8 (`ct2_matches_explicit`) |
+| Served LLM engine (HTTP) | Explicit runner, greedy: agreement on the first 24 characters of every prompt (`scripts/engine_parity.py`, exit 0 or it does not serve) |
 | Pipeline end-to-end | Standalone ASR + standalone LLM outputs |
 
 The explicit runners stay the reference implementation; an engine or a

@@ -156,8 +156,6 @@ class Config:
     llm_base_url: str = field(
         default_factory=lambda: os.getenv("LLM_BASE_URL", "http://127.0.0.1:8000/v1"))
     llm_api_key: str | None = field(default_factory=lambda: os.getenv("LLM_API_KEY") or None)
-    llm_chat_endpoint: bool = field(
-        default_factory=lambda: os.getenv("LLM_CHAT_ENDPOINT", "").lower() in {"1", "true", "yes"})
 
 
 class DemoAgent:
@@ -189,7 +187,6 @@ class DemoAgent:
         self.llm_runner, tokenizer, llm_info = build_llm(
             self.config.llm_engine, model=self.config.llm_model, device=self.config.device,
             base_url=self.config.llm_base_url, api_key=self.config.llm_api_key,
-            chat=self.config.llm_chat_endpoint,
         )
         if self.config.tts_backend == "mms":
             from tts.local import MmsTtsSynthesizer

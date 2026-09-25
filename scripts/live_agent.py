@@ -58,10 +58,6 @@ def main() -> int:
                              "4.4 s measured turn")
     parser.add_argument("--llm-base-url", default="http://127.0.0.1:8000/v1")
     parser.add_argument("--llm-api-key", default=None)
-    parser.add_argument("--llm-chat-endpoint", action="store_true",
-                        help="Let the server apply its own chat template. Off by "
-                             "default: the turn already rendered one, and applying "
-                             "both double-wraps the prompt")
     parser.add_argument("--tts", default="edge", choices=["edge", "mms"])
     parser.add_argument("--language", default="hi")
     parser.add_argument("--input-device", default=None)
@@ -102,7 +98,6 @@ def main() -> int:
         args.llm_engine, model=args.llm_model, device=args.device,
         static_cache=args.llm_compile, compile_decode=args.llm_compile,
         base_url=args.llm_base_url, api_key=args.llm_api_key,
-        chat=args.llm_chat_endpoint,
     )
     print(f"asr engine: {args.asr_engine} | llm: {llm_info}")
     if args.tts == "edge":

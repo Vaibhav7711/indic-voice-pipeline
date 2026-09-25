@@ -178,6 +178,54 @@ the **distribution** of `response_latency_ms` and its segments. One turn is an
 anecdote; this project has already been misled once by quoting a single
 number.
 
+### Phase 4 — the serving engine, and the turn-latency knobs
+
+This phase is where the measured latency actually is. Do not start it before
+Phase 1; do not skip the parity gate in it.
+
+The LLM was 3324 ms of a 4435.5 ms p50 turn, and ASR was 342 ms *and off the
+critical path* (the candidate final decodes during endpoint silence). Any plan
+that optimizes ASR first is optimizing 2% and has misread the evidence.
+
+The engine is [`Vaibhav7711/full-inference-engine`](https://github.com/Vaibhav7711/full-inference-engine):
+an OpenAI-compatible server for Qwen3-0.6B, which is already this pipeline's
+LLM. Clone it beside this repo. `docs/SERVING.md` is the runbook.
+
+```bash
+# start it, and wait for /ready — not /health, which answers all through warmup
+python scripts/serve_llm.py --engine-root ../full-inference-engine \
+    --app engine.server.api:create_app &
+
+# the gate. it must exit 0 before any latency from this engine is recorded
+python scripts/engine_parity.py --llm-base-url http://127.0.0.1:8000/v1
+
+# the sweep: four arms, interleaved, on one set of loaded weights
+python scripts/latency_ab.py --rounds 8 \
+    --llm-engine explicit --llm-engine http \
+    --arm baseline \
+    --arm served:llm_engine=http \
+    --arm history200:history_tokens=200 \
+    --arm units30:unit_chars=30
+```
+
+- **Parity fails** → stop. Record the divergence point and the two texts from
+  `results/engine_parity/parity.json`, and do not record the engine's latency
+  as this pipeline's latency. A faster engine that answers differently is not
+  serving the same model. Early divergence (first few characters) means
+  prefill differs and is a defect; late divergence is fp16 non-associativity
+  and passes the gate by design.
+- **Parity passes** → apply the pre-registered rules in `docs/EXPERIMENTS.md`
+  §"the serving-engine and turn-latency sweep". They are already written; do
+  not re-derive them from the numbers you just saw.
+- **Never `--llm-chat-endpoint`** — there is no such flag any more, and
+  `build_llm` refuses `chat=True`. The turn renders Qwen3's template with
+  `enable_thinking=False`; the server's route renders it without. Both applied
+  means the model answers from inside `<think>` and there is nothing to speak.
+
+Two of the three arms have a human condition attached (`history200` needs a
+referring expression resolved across turns; `units30` needs a listening pass).
+Those are in the "requires a human" list below, not yours to close.
+
 ## Pre-registered decision rules
 
 Fixed **now**, before the results exist, so a disappointing number cannot be
@@ -191,6 +239,9 @@ reinterpreted into a success. Apply literally.
 | TTS backend | lower `first_chunk_ms_p50` with acceptable audio in the saved WAVs | keep edge-tts and record the local model's cost |
 | CTranslate2 engine | `ct2_matches_explicit` passes (token-identical at fp16, ≤ 5% WER apart at int8) **and** speedup > 1.3× | keep the explicit runner |
 | Compiled decode | tokens match **and** speedup > 1.1× | keep it off; the T4 measured 0.9× |
+| Served LLM engine | `scripts/engine_parity.py` exits 0 **and** response-latency p50 improves > 1.1× | keep the explicit runner, record the measured ratio |
+| `max_history_tokens` 800 → 200 | first-token p50 improves ≥ 200 ms **and** a cross-turn referring expression still resolves | keep 800; latency bought by forgetting the conversation is not a win |
+| `max_unit_chars` 60 → 30 | first-unit p50 improves ≥ 300 ms **and** human listening accepts the clause break | keep 60, record the measured gain as available-but-unclaimed |
 
 Judgements that need ears — Hindi fluency of an LLM answer, TTS voice quality
 — are the one place you must not decide alone. Score what you can
@@ -250,6 +301,13 @@ Each exists because violating it cost real time on this project.
   judgement calls. Do not synthesise a hard set.
 - **Final LLM and TTS choice**, insofar as it depends on hearing Hindi
   fluency and voice quality. Narrow to a ranked shortlist with evidence.
+- **Whether a shorter first unit (`max_unit_chars` 30) sounds acceptable.**
+  Measure the latency it buys; the clause break lands in a slightly odder
+  place and only ears settle that. Mark it *pending human listening*.
+- **Whether a 200-token history budget still holds a conversation.** You can
+  run the cross-turn referring-expression check and report what the assistant
+  said; whether the shorter memory is acceptable for a dialogue agent is not
+  a latency question.
 - **Publishing anything** (Hub uploads, new remotes, making a repo public).
 - **Device-level barge-in** — impossible in Colab. Leave the laptop-validated
   result standing and say so.
@@ -265,6 +323,9 @@ Each exists because violating it cost real time on this project.
   `results/BLOCKED.md` explaining why not.
 - `docs/EXPERIMENTS.md` has an entry per result, with evidence paths.
 - Live turns: a distribution over ≥ 12 turns, not one example.
+- The served engine has either passed `scripts/engine_parity.py` and had its
+  A/B recorded, or has a `results/BLOCKED.md` entry saying what stopped it.
+  "Faster" without the parity gate is not a result this project accepts.
 - `pytest` passes, `ruff check .` is clean, everything committed and pushed.
 - `results/SESSION.md` summarising what was decided, what changed, and what a
   next session should pick up — written for a reader who was not here.
