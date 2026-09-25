@@ -45,6 +45,23 @@ def main() -> int:
     parser.add_argument("--adapter", default="Hugme6969/whisper-medium-hindi-lora")
     parser.add_argument("--llm-model", default="Qwen/Qwen3-0.6B")
     parser.add_argument("--llm-compile", action="store_true")
+    parser.add_argument("--asr-engine", default="explicit", choices=["explicit", "ct2"],
+                        help="ct2 serves from a converted CTranslate2 model "
+                             "(scripts/convert_ct2.py); measured 1.31x, but ASR is "
+                             "off the critical path so expect ~90 ms of a ~4 s turn")
+    parser.add_argument("--ct2-model", default=None)
+    parser.add_argument("--ct2-compute-type", default="int8_float16")
+    parser.add_argument("--llm-engine", default="explicit", choices=["explicit", "http"],
+                        help="http serves from an OpenAI-compatible endpoint "
+                             "(vLLM, SGLang, llama.cpp server, a custom engine). "
+                             "This is where the seconds are: the LLM was 3.3 s of a "
+                             "4.4 s measured turn")
+    parser.add_argument("--llm-base-url", default="http://127.0.0.1:8000/v1")
+    parser.add_argument("--llm-api-key", default=None)
+    parser.add_argument("--llm-chat-endpoint", action="store_true",
+                        help="Let the server apply its own chat template. Off by "
+                             "default: the turn already rendered one, and applying "
+                             "both double-wraps the prompt")
     parser.add_argument("--tts", default="edge", choices=["edge", "mms"])
     parser.add_argument("--language", default="hi")
     parser.add_argument("--input-device", default=None)
@@ -72,20 +89,22 @@ def main() -> int:
 
     from agent import Conversation, VoiceTurn
     from agent.audio import SoundDeviceSink
-    from asr.explicit import ASRRunner, load_whisper
     from asr.streaming import StreamingConfig, StreamingSession, UpdateKind
-    from llm import LLMRunner, load_llm
+    from llm.engines import build_asr, build_llm
 
     print("loading models…", flush=True)
     dtype = getattr(torch, args.whisper_dtype) if args.whisper_dtype else None
-    whisper = load_whisper(args.whisper_model, adapter_path=args.adapter or None,
-                           device=args.device, dtype=dtype)
-    asr = ASRRunner(whisper.model, whisper.processor, whisper.device, whisper.dtype)
-    llm = load_llm(args.llm_model, device=args.device)
-    print(f"whisper on {whisper.device} ({whisper.dtype}), llm on {llm.device} ({llm.dtype})")
-    llm_runner = LLMRunner(llm.model, llm.tokenizer, llm.device,
-                           static_cache=args.llm_compile, compile_decode=args.llm_compile,
-                           max_cache_len=1024)
+    asr = build_asr(args.asr_engine, model=args.whisper_model,
+                    adapter=args.adapter or None, device=args.device, dtype=dtype,
+                    ct2_model=args.ct2_model, ct2_compute_type=args.ct2_compute_type,
+                    language_candidates=[args.language])
+    llm_runner, llm_tokenizer, llm_info = build_llm(
+        args.llm_engine, model=args.llm_model, device=args.device,
+        static_cache=args.llm_compile, compile_decode=args.llm_compile,
+        base_url=args.llm_base_url, api_key=args.llm_api_key,
+        chat=args.llm_chat_endpoint,
+    )
+    print(f"asr engine: {args.asr_engine} | llm: {llm_info}")
     if args.tts == "edge":
         from tts import EdgeStreamingSynthesizer
 
@@ -95,7 +114,11 @@ def main() -> int:
 
         synth = MmsTtsSynthesizer(args.language)
         print(f"tts warm-up {synth.warm_up():.0f} ms")
-    if args.llm_compile:
+    if args.llm_engine == "http":
+        # Fail at startup, not mid-turn, if the endpoint is not serving.
+        print("probing the llm endpoint…", flush=True)
+        print(llm_runner.probe())
+    elif args.llm_compile:
         llm_runner.generate("नमस्ते", max_new_tokens=4)          # graph capture off the first turn
 
     config = StreamingConfig(
@@ -117,7 +140,7 @@ def main() -> int:
     if args.history_turns > 0:
         conversation = Conversation(max_turns=args.history_turns,
                                     max_history_tokens=args.history_tokens,
-                                    tokenizer=llm.tokenizer)
+                                    tokenizer=llm_tokenizer)
     turn = VoiceTurn(llm_runner, synth, response_language="Hindi",
                      sink_factory=sink_factory, conversation=conversation)
 

@@ -145,6 +145,19 @@ class Config:
     llm_model: str = field(default_factory=lambda: os.getenv("LLM_MODEL", DEFAULT_LLM))
     tts_backend: str = field(default_factory=lambda: os.getenv("TTS_BACKEND", "edge"))
     device: str | None = field(default_factory=lambda: os.getenv("DEVICE") or None)
+    #: Engine selection is explicit (env-driven here) rather than "use the fast
+    #: one if it is installed" — an engine that changes underneath you makes
+    #: every recorded latency incomparable to the last.
+    asr_engine: str = field(default_factory=lambda: os.getenv("ASR_ENGINE", "explicit"))
+    ct2_model: str | None = field(default_factory=lambda: os.getenv("CT2_MODEL") or None)
+    ct2_compute_type: str = field(
+        default_factory=lambda: os.getenv("CT2_COMPUTE_TYPE", "int8_float16"))
+    llm_engine: str = field(default_factory=lambda: os.getenv("LLM_ENGINE", "explicit"))
+    llm_base_url: str = field(
+        default_factory=lambda: os.getenv("LLM_BASE_URL", "http://127.0.0.1:8000/v1"))
+    llm_api_key: str | None = field(default_factory=lambda: os.getenv("LLM_API_KEY") or None)
+    llm_chat_endpoint: bool = field(
+        default_factory=lambda: os.getenv("LLM_CHAT_ENDPOINT", "").lower() in {"1", "true", "yes"})
 
 
 class DemoAgent:
@@ -154,7 +167,6 @@ class DemoAgent:
     def __init__(self, config: Config | None = None):
         self.config = config or Config()
         self.asr = None
-        self.llm = None
         self.llm_runner = None
         self.synth = None
         self.conversation = None
@@ -166,16 +178,19 @@ class DemoAgent:
         if self.asr is not None:
             return self
         from agent import Conversation
-        from asr.explicit import ASRRunner, load_whisper
-        from llm import LLMRunner, load_llm
+        from llm.engines import build_asr, build_llm
 
-        whisper = load_whisper(self.config.whisper_model, adapter_path=self.config.adapter,
-                               device=self.config.device)
-        self.asr = ASRRunner(whisper.model, whisper.processor, whisper.device, whisper.dtype,
-                             language_candidates=LANGUAGES)
-        llm = load_llm(self.config.llm_model, device=self.config.device)
-        self.llm = llm
-        self.llm_runner = LLMRunner(llm.model, llm.tokenizer, llm.device)
+        self.asr = build_asr(
+            self.config.asr_engine, model=self.config.whisper_model,
+            adapter=self.config.adapter, device=self.config.device,
+            ct2_model=self.config.ct2_model, ct2_compute_type=self.config.ct2_compute_type,
+            language_candidates=LANGUAGES,
+        )
+        self.llm_runner, tokenizer, llm_info = build_llm(
+            self.config.llm_engine, model=self.config.llm_model, device=self.config.device,
+            base_url=self.config.llm_base_url, api_key=self.config.llm_api_key,
+            chat=self.config.llm_chat_endpoint,
+        )
         if self.config.tts_backend == "mms":
             from tts.local import MmsTtsSynthesizer
 
@@ -185,14 +200,14 @@ class DemoAgent:
             from tts import EdgeStreamingSynthesizer
 
             self.synth = EdgeStreamingSynthesizer(language="hi")
-        self.conversation = Conversation(max_turns=6, tokenizer=llm.tokenizer)
+        self.conversation = Conversation(max_turns=6, tokenizer=tokenizer)
         self.info = {
             "whisper": self.config.whisper_model,
-            "adapter": whisper.adapter_path or "none (base model)",
+            "adapter": self.config.adapter or "none (base model)",
+            "asr_engine": self.config.asr_engine,
             "llm": self.config.llm_model,
             "tts": self.config.tts_backend,
-            "device": str(whisper.device),
-            "dtype": str(whisper.dtype),
+            **llm_info,
         }
         return self
 

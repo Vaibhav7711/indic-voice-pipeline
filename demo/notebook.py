@@ -195,12 +195,26 @@ class NotebookAgent:
         language: str = "hi",
         device: str | None = None,
         history_turns: int = 6,
+        asr_engine: str = "explicit",
+        ct2_model: str | None = None,
+        ct2_compute_type: str = "int8_float16",
+        llm_engine: str = "explicit",
+        llm_base_url: str = "http://127.0.0.1:8000/v1",
+        llm_api_key: str | None = None,
+        llm_chat_endpoint: bool = False,
+        max_history_tokens: int = 800,
     ):
         self.language = language
         self.config = {"whisper": whisper, "adapter": adapter, "llm": llm, "tts": tts,
-                       "device": device, "history_turns": history_turns}
+                       "device": device, "history_turns": history_turns,
+                       "asr_engine": asr_engine, "ct2_model": ct2_model,
+                       "ct2_compute_type": ct2_compute_type,
+                       "llm_engine": llm_engine, "llm_base_url": llm_base_url,
+                       "llm_chat_endpoint": llm_chat_endpoint,
+                       "max_history_tokens": max_history_tokens}
+        self.llm_api_key = llm_api_key
+        self.llm_info: dict = {}
         self.asr = None
-        self.llm = None
         self.llm_runner = None
         self.synth = None
         self.conversation = None
@@ -210,18 +224,26 @@ class NotebookAgent:
         if self.asr is not None:
             return self
         from agent import Conversation
-        from asr.explicit import ASRRunner, load_whisper
-        from llm import LLMRunner, load_llm
+        from llm.engines import build_asr, build_llm
 
         cfg = self.config
-        print(f"loading {cfg['whisper']}" + (f" + {cfg['adapter']}" if cfg["adapter"] else ""),
-              flush=True)
-        whisper = load_whisper(cfg["whisper"], adapter_path=cfg["adapter"], device=cfg["device"])
-        self.asr = ASRRunner(whisper.model, whisper.processor, whisper.device, whisper.dtype,
-                             language_candidates=["hi", "en", "te"])
-        print(f"loading {cfg['llm']}", flush=True)
-        self.llm = load_llm(cfg["llm"], device=cfg["device"])
-        self.llm_runner = LLMRunner(self.llm.model, self.llm.tokenizer, self.llm.device)
+        print(f"loading asr ({cfg['asr_engine']}): {cfg['whisper']}"
+              + (f" + {cfg['adapter']}" if cfg["adapter"] else ""), flush=True)
+        self.asr = build_asr(
+            cfg["asr_engine"], model=cfg["whisper"], adapter=cfg["adapter"],
+            device=cfg["device"], ct2_model=cfg["ct2_model"],
+            ct2_compute_type=cfg["ct2_compute_type"],
+            language_candidates=["hi", "en", "te"],
+        )
+        print(f"loading llm ({cfg['llm_engine']}): {cfg['llm']}", flush=True)
+        self.llm_runner, tokenizer, self.llm_info = build_llm(
+            cfg["llm_engine"], model=cfg["llm"], device=cfg["device"],
+            base_url=cfg["llm_base_url"], api_key=self.llm_api_key,
+            chat=cfg["llm_chat_endpoint"],
+        )
+        self._tokenizer = tokenizer
+        if cfg["llm_engine"] == "http":
+            print("probing the llm endpoint:", self.llm_runner.probe(), flush=True)
         if cfg["tts"] == "mms":
             from tts.local import MmsTtsSynthesizer
 
@@ -232,9 +254,12 @@ class NotebookAgent:
 
             self.synth = EdgeStreamingSynthesizer(language=self.language)
         if cfg["history_turns"]:
-            self.conversation = Conversation(max_turns=cfg["history_turns"],
-                                             tokenizer=self.llm.tokenizer)
-        print(f"ready on {whisper.device} ({whisper.dtype})", flush=True)
+            self.conversation = Conversation(
+                max_turns=cfg["history_turns"],
+                max_history_tokens=cfg["max_history_tokens"],
+                tokenizer=tokenizer,
+            )
+        print(f"ready: {self.llm_info}", flush=True)
         return self
 
     # -- one turn ---------------------------------------------------------
@@ -421,11 +446,14 @@ class NotebookAgent:
             # comparison between candidates.
             "config": {
                 "whisper": self.config["whisper"], "adapter": self.config["adapter"],
+                "asr_engine": self.config["asr_engine"],
+                "ct2_compute_type": (self.config["ct2_compute_type"]
+                                     if self.config["asr_engine"] == "ct2" else None),
                 "llm": self.config["llm"], "tts": self.config["tts"],
                 "language": self.language, "max_tokens": max_tokens,
-                "device": str(getattr(self.llm, "device", None)),
-                "dtype": str(getattr(self.llm, "dtype", None)),
-                "quantization": getattr(self.llm, "quantization", None),
+                "max_history_tokens": self.config["max_history_tokens"],
+                "history_turns_config": self.config["history_turns"],
+                **self.llm_info,
             },
             "vad": config.vad.as_dict(),
             "utterances": len(finals),
