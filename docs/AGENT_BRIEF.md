@@ -239,7 +239,7 @@ reinterpreted into a success. Apply literally.
 | TTS backend | lower `first_chunk_ms_p50` with acceptable audio in the saved WAVs | keep edge-tts and record the local model's cost |
 | CTranslate2 engine | `ct2_matches_explicit` passes (token-identical at fp16, ≤ 5% WER apart at int8) **and** speedup > 1.3× | keep the explicit runner |
 | Compiled decode | tokens match **and** speedup > 1.1× | keep it off; the T4 measured 0.9× |
-| Served LLM engine | `scripts/engine_parity.py` exits 0 **and** response-latency p50 improves > 1.1× | keep the explicit runner, record the measured ratio |
+| Served LLM engine | `scripts/engine_parity.py` exits 0 **and** p50 transcript → first audio improves > 1.1× | keep the explicit runner, record the measured ratio |
 | `max_history_tokens` 800 → 200 | first-token p50 improves ≥ 200 ms **and** a cross-turn referring expression still resolves | keep 800; latency bought by forgetting the conversation is not a win |
 | `max_unit_chars` 60 → 30 | first-unit p50 improves ≥ 300 ms **and** human listening accepts the clause break | keep 60, record the measured gain as available-but-unclaimed |
 

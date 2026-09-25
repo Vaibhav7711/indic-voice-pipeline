@@ -226,6 +226,7 @@ class HttpLLMEngine:
         start = perf_counter_ns()
         last = start
         stopped = False
+        completed = False
         # Held so it can be closed explicitly: closing the response is what the
         # server sees as a disconnect, and this engine cancels the request on
         # disconnect. Leaving it to garbage collection would keep generating
@@ -238,6 +239,7 @@ class HttpLLMEngine:
                     continue
                 data = line[len("data:"):].strip()
                 if data == "[DONE]":
+                    completed = True
                     break
                 try:
                     chunk = json.loads(data)
@@ -261,6 +263,10 @@ class HttpLLMEngine:
                 if should_stop is not None and should_stop():
                     stopped = True
                     break
+            else:
+                # The transport ran out without a [DONE]. Still a complete
+                # response as far as this side is concerned.
+                completed = True
         except OSError as error:                        # includes urllib's HTTPError
             metrics.error = _error_detail(error)
             raise
@@ -268,7 +274,15 @@ class HttpLLMEngine:
             closer = getattr(source, "close", None)
             if closer is not None:
                 closer()
-            metrics.stopped_by_caller = stopped
+            # A caller stops this stream in two ways, and only one of them
+            # trips `should_stop`. `agent.turn` cancels playback and abandons
+            # the generator, which arrives here as GeneratorExit -- no break,
+            # no error, just a stream that ended early. Recording only the
+            # explicit case reported `stopped_by_caller: False` on a real
+            # barge-in, which is the metric claiming the response finished
+            # when the user had cut it off mid-sentence.
+            metrics.stopped_by_caller = stopped or (
+                not completed and metrics.error is None)
             metrics.total_ms = (perf_counter_ns() - start) / 1_000_000
             if metrics.generated_tokens is None and metrics.chunks:
                 # No usage reported: the chunk count is a lower bound, since a

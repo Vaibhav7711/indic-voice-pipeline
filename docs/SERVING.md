@@ -150,3 +150,11 @@ python scripts/latency_ab.py --rounds 8 \
 
 The decision rules are pre-registered in `docs/EXPERIMENTS.md`. The script
 prints distributions and decides nothing.
+
+Its primary metric is **committed transcript → first audio**, not
+`response_latency_ms`. The latter is speech-end → agent-speaks and is `None`
+without the endpoint-to-final segment; these turns carry fixed text and no
+speech, so that segment does not exist and is not invented. It appears in the
+summary as `n/a`, which is the honest reading. The measured 660.8 ms
+endpoint-to-final floor sits under any perceived-latency figure and none of
+these arms move it.

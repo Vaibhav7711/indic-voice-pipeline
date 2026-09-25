@@ -560,9 +560,20 @@ first token and ~42 ms/token.
   greedy, so this is a real constraint and not a formality. A failure is
   reported and investigated; it is not "close enough".
 - *Decision rule:* adopt the served engine as the LLM tier if parity passes
-  **and** response-latency p50 improves by ≥ 1.1× against the baseline arm.
-  Below 1.1×, keep the explicit runner — the same threshold that rejected
-  compiled decode at 0.8526× and accepted CTranslate2 at 1.3145×.
+  **and** p50 **committed transcript → first audio** improves by ≥ 1.1×
+  against the baseline arm. Below 1.1×, keep the explicit runner — the same
+  threshold that rejected compiled decode at 0.8526× and accepted
+  CTranslate2 at 1.3145×.
+- *Metric correction, made before the first run and recorded rather than
+  quietly applied:* this rule first named `response_latency_ms`, which the
+  harness cannot produce. That metric is speech-end → agent-speaks, and it is
+  `None` unless the endpoint-to-final segment exists; these arms are driven by
+  fixed text with no speech in them, so it would have been `None` for every
+  arm and the rule unfalsifiable. Supplying a plausible figure for a segment
+  that did not happen would have made every headline number partly invented.
+  Transcript → first audio is the sum of the two segments the arms actually
+  change. The endpoint-to-final floor (660.8 ms mean, measured) sits under any
+  perceived-latency figure and is unaffected by all three arms.
 - *Prediction:* p50 improves by more than 1.1×. If it does not, the likely
   cause is that batch-1 single-stream serving does not benefit from continuous
   batching, which is a throughput optimization; the win would then have to

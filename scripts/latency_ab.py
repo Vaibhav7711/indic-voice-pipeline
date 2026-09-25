@@ -87,6 +87,16 @@ def percentile(values: list[float], fraction: float) -> float | None:
     return ordered[index]
 
 
+#: The metric this sweep is judged on. `response_latency_ms` -- user stops
+#: talking to agent starts talking -- is `None` here and correctly so: it
+#: needs the endpoint-to-final segment, and these turns are driven by fixed
+#: text with no speech in them. Supplying a plausible number for a segment
+#: that did not happen would make every arm's headline figure partly
+#: invented. So the sweep reports what it can actually observe: committed
+#: transcript to first audio, which is the two segments the arms change.
+PRIMARY = "transcript_to_first_audio_ms"
+
+
 def metrics_of(record: dict) -> dict:
     """The metrics block of a turn record, wherever it lives.
 
@@ -98,7 +108,16 @@ def metrics_of(record: dict) -> dict:
     driver and the summary.
     """
     nested = record.get("metrics")
-    return nested if isinstance(nested, dict) else record
+    block = dict(nested if isinstance(nested, dict) else record)
+    first_token = block.get("final_transcript_to_first_llm_token_ms")
+    to_audio = block.get("first_llm_token_to_playback_start_ms")
+    if isinstance(first_token, (int, float)) and isinstance(to_audio, (int, float)):
+        block[PRIMARY] = first_token + to_audio
+    else:
+        # One of the halves is missing, which means the turn did not reach
+        # audio. That is not a fast turn; it is a turn that did not finish.
+        block.setdefault(PRIMARY, None)
+    return block
 
 
 def summarize(records: list[dict]) -> dict:
@@ -109,7 +128,8 @@ def summarize(records: list[dict]) -> dict:
     instantly", and averaging the second into a benchmark is how a broken run
     becomes a headline.
     """
-    fields = ("response_latency_ms", "final_transcript_to_first_llm_token_ms",
+    fields = (PRIMARY, "response_latency_ms",
+              "final_transcript_to_first_llm_token_ms",
               "first_token_to_first_unit_ms", "tts_synthesis_ms", "total_turn_ms")
     blocks = [metrics_of(record) for record in records]
     summary: dict = {"turns": len(records)}
@@ -257,12 +277,13 @@ def main(argv: list[str] | None = None) -> int:
                 records[name].append(record)
                 sink.write(json.dumps(record, ensure_ascii=False) + "\n")
                 sink.flush()
-                latency = metrics_of(record).get("response_latency_ms")
+                latency = metrics_of(record).get(PRIMARY)
                 shown = f"{latency:7.1f} ms" if isinstance(latency, (int, float)) else "     n/a"
                 print(f"round {index + 1}/{args.rounds}  {name:<14} {shown}", flush=True)
 
     summary = {
         "note": args.note,
+        "primary_metric": PRIMARY,
         "rounds": args.rounds,
         "elapsed_s": round(time.time() - started, 1),
         "prompts": prompts,
@@ -285,10 +306,13 @@ def main(argv: list[str] | None = None) -> int:
     for name, _ in arms:
         block = summary["arms"][name]
         print(f"{name:<16}{block['turns']:>6}"
-              f"{show(block, 'response_latency_ms')}"
-              f"{show(block, 'response_latency_ms', 'p90')}"
+              f"{show(block, PRIMARY)}"
+              f"{show(block, PRIMARY, 'p90')}"
               f"{show(block, 'final_transcript_to_first_llm_token_ms'):>11}"
               f"{show(block, 'first_token_to_first_unit_ms')}")
+    print("p50/p90 are transcript -> first audio. response_latency_ms is n/a "
+          "by construction: these turns carry no speech, so the "
+          "endpoint-to-final segment does not exist and is not invented.")
     print(f"\nrecords: {out_path}\nsummary: {summary_path}")
     print("Apply the pre-registered rules in docs/EXPERIMENTS.md; this script "
           "does not decide.")
