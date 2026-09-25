@@ -65,6 +65,44 @@ Three facts to hold together when reading any result from it:
 | **Latency, measured** | The T4 bake-off measured first-sentence p50 at **1744 ms for 0.6B and 3553 ms for 4B** on the explicit runner. Moving to 4B therefore roughly doubles the metric this project is trying to reduce, *unless* the engine recovers more than 2×. That is the bet, and it is what the pre-registered sweep tests. |
 | **Speculative decoding is not available here** | The mechanism that could most plausibly pay for 4B's decode cost — a 0.6B draft — needs two GPUs: `create_app` raises when target and draft share a device, and the profile for it is `create_kaggle_t4x2_speculative_app`. The engine's own record also notes the 0.6B drafter did not beat target-only on the measured T4. So on one card, 4B's win has to come from CUDA-graphed decode and chunked prefill alone. |
 
+### Known blocker: the engine corrupts streamed Indic text
+
+Measured 2026-09-25 on a Colab T4, Qwen3-0.6B: 1/1 English prompt identical,
+**0/4 Hindi prompts agreeing**, every served Hindi response studded with
+U+FFFD. `nमस्ते, मौसम कैसा है?` came back as `नमस्�े, म�सम क�सा ह�?` — the
+correct characters *dropped*, not merely altered.
+
+It is not a decode divergence. Qwen's tokenizer is byte-level BPE, so a 3-byte
+Devanagari character is routinely split across two tokens; the engine's
+`_stream` decodes the tokens received so far and sends
+`decoded[len(already_sent):]`, a slice by length. When a character is
+half-arrived that decode ends in U+FFFD, which gets sent; when the rest
+arrives the corrected text is no longer an extension of what was sent, so the
+replacement character can never be retracted and the real character is skipped.
+ASCII never triggers it, which is why it survived a suite whose streaming
+tests are all English.
+
+**This blocks the whole sweep.** Corrupted text goes to TTS and is pronounced.
+The fix is four lines in the engine, in
+[`ENGINE_BUG_UTF8_STREAMING.md`](ENGINE_BUG_UTF8_STREAMING.md) with the
+reproduction. A larger model does not help — any byte-level BPE over any
+multi-byte script hits it.
+
+Downstream, `HttpEngineMetrics.replacement_chars` counts U+FFFD, the startup
+probe uses a Devanagari prompt so this is caught before the first turn, and
+`scripts/engine_parity.py` fails on corruption with its own diagnosis rather
+than reporting a divergence.
+
+### Match the dtypes, or the gate is meaningless
+
+The same run had a second, independent flaw: the reference loaded **bfloat16**
+(`pick_dtype`'s default on that device) while the server served **float16**.
+Two greedy decoders over different numerics diverge for reasons that say
+nothing about either engine. `scripts/engine_parity.py --dtype` now sets the
+reference explicitly, defaults to `float16` to match
+`scripts/llm_server_app.py`, and records both dtypes in the report so a
+mismatch can be checked for afterwards.
+
 **On token agreement.** A greedy decoder diverges at the first step where two
 implementations rank the top two candidates differently, so agreement tracks
 how confident the model is per step. A small model has flatter logits and

@@ -23,6 +23,21 @@ decoded during the endpoint silence, so `asr_after_endpoint ≈ 0`). The LLM was
 2446 ms until enough text existed to speak. A Whisper engine at 1.31× saves
 ~90 ms; the LLM is where seconds are.
 
+**Streamed Indic text can arrive corrupted, and this adapter counts it.**
+Qwen's tokenizer is byte-level BPE, so a 3-byte Devanagari character is
+routinely split across two tokens. A server that streams by decoding the
+tokens it has so far and sending the string diff will decode a partial
+character as U+FFFD, send it, and then have no way to retract it -- the
+corrected text is no longer an extension of what it already sent. The real
+character is dropped and the replacement character is spoken. English never
+shows this, because ASCII is one byte per character.
+
+``replacement_chars`` counts U+FFFD in the streamed text for exactly this
+reason. It is not cosmetic: corrupted text goes straight to TTS and is
+pronounced, so a voice agent mangling every fourth character would otherwise
+pass every test this pipeline has. Nothing here can repair it -- the bytes are
+gone by the time they arrive -- so the count exists to make it loud.
+
 **What this adapter cannot measure.** Token counts come from the server's own
 accounting when it reports usage; times are inferred from arrival. The first
 chunk's arrival is time-to-first-token *including network latency*, flagged by
@@ -83,6 +98,10 @@ class HttpEngineMetrics:
     #: so these are an upper bound on per-token latency and the count of them
     #: is a lower bound on the token count.
     decode_is_per_chunk: bool = True
+    #: U+FFFD characters in the streamed text. Non-zero means the server's
+    #: incremental decode is splitting multi-byte characters; see the module
+    #: docstring. The text cannot be repaired here, only reported.
+    replacement_chars: int = 0
     #: Status code and body of a failed request, so the engine's own refusal
     #: ("prompt exceeds the 4096-token server limit") reaches the caller
     #: instead of urllib's bare "HTTP Error 413".
@@ -104,6 +123,7 @@ class HttpEngineMetrics:
             "generated_tokens": self.generated_tokens,
             "stopped_by_caller": self.stopped_by_caller,
             "stopped_on_repetition": self.stopped_on_repetition,
+            "replacement_chars": self.replacement_chars,
             "prefill_is_arrival_time": self.prefill_is_arrival_time,
             "decode_is_per_chunk": self.decode_is_per_chunk,
             "chunks": self.chunks or None,
@@ -254,6 +274,7 @@ class HttpLLMEngine:
                     continue
                 now = perf_counter_ns()
                 metrics.chunks += 1
+                metrics.replacement_chars += piece.count("�")
                 if metrics.prefill_ms is None:
                     metrics.prefill_ms = (now - start) / 1_000_000
                 else:
@@ -315,6 +336,10 @@ class HttpLLMEngine:
             "first_chunk_ms": metrics.prefill_ms if metrics else None,
             "reported_usage": bool(metrics and metrics.prompt_tokens is not None),
             "chunks": metrics.chunks if metrics else None,
+            # The probe prompt is Devanagari on purpose: this is where a server
+            # that splits multi-byte characters across stream chunks shows
+            # itself, at startup, rather than in a transcript days later.
+            "replacement_chars": metrics.replacement_chars if metrics else None,
         }
 
 

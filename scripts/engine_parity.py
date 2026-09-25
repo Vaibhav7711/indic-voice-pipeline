@@ -70,6 +70,39 @@ def common_prefix_length(left: str, right: str) -> int:
     return limit
 
 
+REPLACEMENT = "�"
+
+
+def corruption(reference: str, served: str) -> dict | None:
+    """U+FFFD in the served text that is not in the reference.
+
+    This is not a divergence and must not be reported as one. Qwen's byte-level
+    BPE splits a 3-byte Devanagari character across two tokens, so a server
+    that streams the diff of its decoded-so-far text emits U+FFFD for the
+    partial character and then cannot retract it: the corrected text is no
+    longer an extension of what it already sent. The real character is lost.
+
+    It is invisible in English, where one byte is one character, so a gate run
+    only on Latin prompts would pass. Calling this "the engine answers
+    differently" sends the reader hunting a numerics bug in attention kernels
+    when the defect is four lines of stream bookkeeping.
+    """
+    served_count = served.count(REPLACEMENT)
+    if not served_count:
+        return None
+    return {
+        "served_replacement_chars": served_count,
+        "reference_replacement_chars": reference.count(REPLACEMENT),
+        "diagnosis": (
+            "the served stream contains U+FFFD replacement characters: its "
+            "incremental decode is splitting multi-byte characters across "
+            "chunks, not answering differently. This is a serving defect in "
+            "the engine, it corrupts every Indic script, and a larger model "
+            "will not fix it."
+        ),
+    }
+
+
 def compare(reference: str, served: str, *, prefix_chars: int) -> dict:
     """One prompt's verdict. `agreed` is the gate; the rest is diagnosis."""
     shared = common_prefix_length(reference, served)
@@ -85,6 +118,9 @@ def compare(reference: str, served: str, *, prefix_chars: int) -> dict:
         "shared_prefix_chars": shared,
         "required_prefix_chars": required,
         "agreed": agreed,
+        # Checked separately from agreement, because a corrupted stream and a
+        # divergent decode need entirely different fixes.
+        "corruption": corruption(reference, served),
         "reference_chars": len(reference),
         "served_chars": len(served),
         # The first place they differ, with a little context on each side, so
@@ -106,6 +142,7 @@ def summarize(results: list[dict]) -> dict:
     agreed = sum(1 for item in results if item["comparison"]["agreed"])
     identical = sum(1 for item in results if item["comparison"]["identical"])
     comparisons = [item["comparison"] for item in results]
+    corrupted = [item for item in comparisons if item.get("corruption")]
     shared = [item["shared_prefix_chars"] for item in comparisons]
     # How much of the reference each served response reproduced. This is the
     # figure to compare between checkpoints: it distinguishes "the engine is
@@ -122,7 +159,13 @@ def summarize(results: list[dict]) -> dict:
         "mean_shared_prefix_chars": sum(shared) / len(shared) if shared else None,
         "mean_shared_fraction": (sum(fractions) / len(fractions)
                                  if fractions else None),
-        "passed": agreed == total,
+        # Reported before the agreement figures are interpreted: while the
+        # stream is corrupted, the agreement rate measures the corruption and
+        # says nothing about whether the two decoders agree.
+        "corrupted_prompts": len(corrupted),
+        "served_replacement_chars": sum(item["corruption"]["served_replacement_chars"]
+                                        for item in corrupted),
+        "passed": agreed == total and not corrupted,
     }
 
 
@@ -139,18 +182,32 @@ def main(argv: list[str] | None = None) -> int:
                         help="characters that must match. fp16 attention is not "
                              "associative, so late divergence is expected; an "
                              "early one means prefill differs")
+    parser.add_argument("--dtype", default="float16",
+                        choices=["float16", "bfloat16", "float32"],
+                        help="the REFERENCE runner's dtype. It must match what "
+                             "the server loaded, or the two greedy decoders are "
+                             "not over the same numerics and will diverge for "
+                             "reasons that have nothing to do with the engine. "
+                             "Defaults to float16 because that is what "
+                             "scripts/llm_server_app.py serves")
     parser.add_argument("--prompt", action="append", default=[], dest="prompts")
     parser.add_argument("--out", default="results/engine_parity/parity.json")
     parser.add_argument("--note", default="")
     args = parser.parse_args(argv)
 
+    import torch
+
     from llm.engines import build_llm
     from llm.prompting import build_chat_prompt, system_prompt_for
 
-    print("loading the reference (explicit) runner…", flush=True)
+    print(f"loading the reference (explicit) runner in {args.dtype}…", flush=True)
     reference, tokenizer, reference_info = build_llm(
-        "explicit", model=args.llm_model, device=args.device)
+        "explicit", model=args.llm_model, device=args.device,
+        dtype=getattr(torch, args.dtype))
     print(f"  {reference_info}", flush=True)
+    if args.dtype not in reference_info.get("dtype", ""):
+        print(f"  WARNING: asked for {args.dtype}, loaded "
+              f"{reference_info.get('dtype')}", flush=True)
 
     print("connecting to the served engine…", flush=True)
     served, _, served_info = build_llm(
@@ -159,6 +216,16 @@ def main(argv: list[str] | None = None) -> int:
     print(f"  {served_info}", flush=True)
     probe = served.probe()
     print(f"  probe: {probe}", flush=True)
+    if probe.get("replacement_chars"):
+        # The probe prompt is Devanagari, so this is known before a single
+        # comparison runs. Say it now: everything printed below would otherwise
+        # read as a decode divergence.
+        print("\n  *** the probe came back with U+FFFD replacement characters.",
+              flush=True)
+        print("  *** The served stream is corrupting multi-byte characters; the",
+              flush=True)
+        print("  *** comparisons below measure that, not decoder agreement.\n",
+              flush=True)
 
     prompts = args.prompts or DEFAULT_PROMPTS
     results = []
@@ -181,11 +248,16 @@ def main(argv: list[str] | None = None) -> int:
             "served_metrics": (served.last_metrics.as_dict()
                                if served.last_metrics else None),
         })
-        mark = "ok  " if comparison["agreed"] else "FAIL"
+        mark = "CORRUPT" if comparison["corruption"] else (
+            "ok  " if comparison["agreed"] else "FAIL")
         extra = "identical" if comparison["identical"] else (
             f"shared {comparison['shared_prefix_chars']} chars")
         print(f"{mark} {index}/{len(prompts)} {extra}: {question}", flush=True)
-        if not comparison["agreed"]:
+        if comparison["corruption"]:
+            found = comparison["corruption"]["served_replacement_chars"]
+            print(f"     CORRUPTED: {found} U+FFFD in the served text — "
+                  f"not a divergence", flush=True)
+        elif not comparison["agreed"]:
             divergence = comparison["divergence"]
             print(f"     at char {divergence['at']}", flush=True)
             print(f"     reference: {divergence['reference']!r}", flush=True)
@@ -197,6 +269,10 @@ def main(argv: list[str] | None = None) -> int:
         "model": args.llm_model,
         "max_new_tokens": args.max_new_tokens,
         "prefix_chars": args.prefix_chars,
+        # Recorded because a mismatch here invalidates the comparison, and a
+        # report that does not state both dtypes cannot be checked for it
+        # later.
+        "reference_dtype_requested": args.dtype,
         "reference": reference_info,
         "served": served_info,
         "probe": probe,
@@ -207,6 +283,22 @@ def main(argv: list[str] | None = None) -> int:
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(json.dumps(report, ensure_ascii=False, indent=2),
                         encoding="utf-8")
+
+    if summary["corrupted_prompts"]:
+        print(f"\n*** {summary['corrupted_prompts']}/{summary['prompts']} served "
+              f"responses contain U+FFFD "
+              f"({summary['served_replacement_chars']} characters total).",
+              file=sys.stderr)
+        print("*** This is a streaming defect, not a decode divergence, and it "
+              "has to be fixed\n*** before the agreement figures below mean "
+              "anything. Qwen's byte-level BPE\n*** splits a 3-byte Devanagari "
+              "character across two tokens; a server that\n*** sends the diff "
+              "of its decoded-so-far text emits U+FFFD for the partial\n*** "
+              "character and cannot retract it, because the corrected text is "
+              "no longer\n*** an extension of what it already sent. The real "
+              "character is lost, and it\n*** is then spoken. A larger model "
+              "does not fix this. English does not show\n*** it, because ASCII "
+              "is one byte per character.", file=sys.stderr)
 
     fraction = summary["mean_shared_fraction"]
     print(f"\n{summary['agreed']}/{summary['prompts']} agreed on the first "

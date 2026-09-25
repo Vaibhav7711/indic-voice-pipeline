@@ -67,6 +67,7 @@ def build_llm(
     *,
     model: str = "Qwen/Qwen3-4B",
     device: str | None = None,
+    dtype=None,
     quantization: str | None = None,
     static_cache: bool = False,
     compile_decode: bool = False,
@@ -127,7 +128,11 @@ def build_llm(
 
     from llm import LLMRunner, load_llm
 
-    loaded = load_llm(model, device=device, quantization=quantization)
+    # dtype is explicit here rather than left to `pick_dtype` whenever two
+    # engines are being compared: a bf16 reference against an fp16 server is
+    # two different sets of numerics, and two greedy decoders over different
+    # numerics diverge for reasons that say nothing about either engine.
+    loaded = load_llm(model, device=device, dtype=dtype, quantization=quantization)
     generator = LLMRunner(loaded.model, loaded.tokenizer, loaded.device,
                           static_cache=static_cache, compile_decode=compile_decode)
     return generator, loaded.tokenizer, {
