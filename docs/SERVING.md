@@ -216,6 +216,27 @@ reports `None` rather than a plausible figure for a checkpoint whose geometry
 it does not have recorded — a made-up VRAM number is worse than none, because
 it gets acted on.
 
+## Answer quality is a separate question from serving
+
+The engine changes how fast a token arrives, not what the token is. Both
+engines produced, from the same checkpoint and the same prompt, *चीनी राजधानी
+है।* — "it is the Chinese capital" — for "What is the capital of India?", and
+the served arm repeated one 11-character phrase thirteen times until it hit the
+token cap.
+
+Two causes, neither of them the engine:
+
+**Greedy decoding.** This pipeline decodes `argmax`, because every correctness
+gate compares two greedy decoders. Qwen's guidance for these models is against
+greedy precisely because it repeats. `benchmarks/answer_quality.py` measures
+four decoders against 18 checkable cases; the rule is pre-registered in
+`docs/EXPERIMENTS.md`. Greedy stays the reference for the gates whatever it
+concludes — sampling is a serving option, not a replacement.
+
+**A metric that could not see the problem.** The model was chosen on
+`devanagari_ratio`, and all four bad answers score 1.000 on it. Script purity
+was never answer quality.
+
 ## Before a fast tier's numbers count
 
 ```bash

@@ -105,6 +105,11 @@ class LLMRunner:
         *,
         repetition_penalty: float = 1.1,
         loop_guard_ngram: int = 4,
+        temperature: float = 0.0,
+        top_p: float = 1.0,
+        top_k: int = 0,
+        min_p: float = 0.0,
+        seed: int | None = None,
         static_cache: bool = False,
         compile_decode: bool = False,
         max_cache_len: int = 2048,
@@ -133,6 +138,35 @@ class LLMRunner:
         # if it still happens, and the metrics say when it fired.
         self.repetition_penalty = repetition_penalty
         self.loop_guard_ngram = loop_guard_ngram
+        #: Sampling. ``temperature=0`` is greedy and is the default, because
+        #: greedy is what makes this runner comparable to `generate()` and to a
+        #: served engine -- every correctness gate in this project decodes
+        #: greedily on both sides.
+        #:
+        #: It is a poor default for *answers*, though. Qwen's guidance for
+        #: these models is against greedy decoding precisely because it
+        #: repeats, and a measured run produced the same 11-character phrase
+        #: thirteen times until it hit the token cap. So sampling is available
+        #: here and off until it is measured: see
+        #: `benchmarks/answer_quality.py` and the rule registered for it.
+        if not 0.0 <= temperature <= 2.0:
+            raise ValueError(f"temperature must be in [0, 2], got {temperature}")
+        if not 0.0 < top_p <= 1.0:
+            raise ValueError(f"top_p must be in (0, 1], got {top_p}")
+        if top_k < 0:
+            raise ValueError(f"top_k must be >= 0, got {top_k}")
+        if not 0.0 <= min_p <= 1.0:
+            raise ValueError(f"min_p must be in [0, 1], got {min_p}")
+        self.temperature = temperature
+        self.top_p = top_p
+        self.top_k = top_k
+        self.min_p = min_p
+        self.seed = seed
+        #: A generator of its own, so sampling is reproducible without
+        #: reseeding global RNG that the rest of the process may rely on.
+        self._generator: torch.Generator | None = None
+        if seed is not None:
+            self._generator = torch.Generator(device=device).manual_seed(seed)
         #: Metrics of the most recent (or in-progress) generate()/stream() call.
         self.last_metrics: LLMMetrics | None = None
 
@@ -173,7 +207,12 @@ class LLMRunner:
         return step
 
     def _select(self, logits: torch.Tensor, seen: list[int]) -> torch.Tensor:
-        """Greedy pick after repetition penalty. ``logits`` is (1, vocab)."""
+        """Pick the next token. ``logits`` is (1, vocab).
+
+        Repetition penalty first, then greedy or sampling. The order matters:
+        penalising after filtering would let a repeated token survive top-k
+        selection and then be penalised into an unreachable rank.
+        """
         if self.repetition_penalty != 1.0 and seen:
             logits = logits.float().clone()
             ids = torch.tensor(sorted(set(seen)), device=logits.device)
@@ -181,7 +220,40 @@ class LLMRunner:
             logits[0, ids] = torch.where(
                 scores > 0, scores / self.repetition_penalty, scores * self.repetition_penalty,
             )
-        return logits.argmax(dim=-1, keepdim=True)
+        if self.temperature <= 0.0:
+            return logits.argmax(dim=-1, keepdim=True)
+        return self._sample(logits)
+
+    def _sample(self, logits: torch.Tensor) -> torch.Tensor:
+        """Temperature, then top-k, then top-p, then min-p, then draw.
+
+        That order is the one `transformers` and the serving engines apply, so
+        the same knobs mean the same thing here as in a request to a server.
+        Filters mask rather than renormalise as they go; one softmax at the end
+        keeps the arithmetic in one place.
+        """
+        scaled = logits.float() / self.temperature
+        if self.top_k > 0:
+            k = min(self.top_k, scaled.shape[-1])
+            threshold = torch.topk(scaled, k, dim=-1).values[..., -1:]
+            scaled = scaled.masked_fill(scaled < threshold, float("-inf"))
+        if self.top_p < 1.0:
+            ordered, index = torch.sort(scaled, descending=True, dim=-1)
+            cumulative = torch.softmax(ordered, dim=-1).cumsum(dim=-1)
+            # Keep the first token whose cumulative mass crosses top_p: shifting
+            # the mask right is what makes the nucleus inclusive rather than
+            # empty when one token already holds more than top_p of the mass.
+            drop = cumulative - torch.softmax(ordered, dim=-1) >= self.top_p
+            drop[..., 0] = False
+            scaled = scaled.masked_fill(
+                drop.scatter(-1, index, drop), float("-inf"))
+        probabilities = torch.softmax(scaled, dim=-1)
+        if self.min_p > 0.0:
+            floor = self.min_p * probabilities.max(dim=-1, keepdim=True).values
+            probabilities = probabilities.masked_fill(probabilities < floor, 0.0)
+            probabilities = probabilities / probabilities.sum(dim=-1, keepdim=True)
+        return torch.multinomial(probabilities, num_samples=1,
+                                 generator=self._generator)
 
     def _decode_tokens(
         self,

@@ -164,6 +164,11 @@ class HttpLLMEngine:
         tokenizer: Any = None,
         stop: list[str] | None = None,
         loop_guard_chars: int = 48,
+        temperature: float = 0.0,
+        top_p: float = 1.0,
+        top_k: int = 0,
+        presence_penalty: float = 0.0,
+        seed: int | None = None,
         extra_body: dict | None = None,
         transport: Callable[[str, dict, dict], Iterator[str]] | None = None,
     ):
@@ -189,6 +194,16 @@ class HttpLLMEngine:
         #: prose does not trip it -- the measured first spoken unit was 41
         #: characters.
         self.loop_guard_chars = loop_guard_chars
+        #: Sampling, sent to the server. 0.0 is greedy, which is what makes a
+        #: parity comparison against the explicit runner meaningful -- and what
+        #: the engine's own SamplingParams documents as taking precedence over
+        #: every other knob. Raise it only when the thing being measured is
+        #: answer quality rather than engine equivalence.
+        self.temperature = temperature
+        self.top_p = top_p
+        self.top_k = top_k
+        self.presence_penalty = presence_penalty
+        self.seed = seed
         self.extra_body = dict(extra_body or {})
         # The timeout is bound here rather than added to the transport
         # signature: a caller injecting a transport for a test should not have
@@ -207,13 +222,24 @@ class HttpLLMEngine:
             "model": self.model,
             "max_tokens": max_new_tokens,
             "stream": True,
-            # Greedy, to match the explicit runner it is replacing. An engine
-            # sampling differently is not serving the same model.
-            "temperature": 0.0,
+            # 0.0 is greedy, matching the explicit runner it replaces: an
+            # engine sampling differently is not serving the same model, and
+            # every parity gate here depends on that.
+            "temperature": self.temperature,
             # Ask for usage on the final chunk where the server supports it,
             # so token counts are reported rather than guessed.
             "stream_options": {"include_usage": True},
         }
+        # Only sent when they differ from the server's own defaults, so a
+        # greedy request stays a minimal greedy request.
+        if self.top_p < 1.0:
+            body["top_p"] = self.top_p
+        if self.top_k > 0:
+            body["top_k"] = self.top_k
+        if self.presence_penalty:
+            body["presence_penalty"] = self.presence_penalty
+        if self.seed is not None:
+            body["seed"] = self.seed
         if self.stop:
             body["stop"] = self.stop
         body.update(self.extra_body)

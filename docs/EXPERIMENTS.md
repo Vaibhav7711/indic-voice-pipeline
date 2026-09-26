@@ -536,6 +536,57 @@ until a speakable unit, not TTS synthesis. The live records do not record the
 selected LLM, TTS backend, GPU, or notebook commit, so this is a real
 distribution but not a configuration-comparison result.
 
+## Pre-registered: sampling versus greedy, and answer quality (registered 2026-09-26)
+
+Registered before the run. Harness: `benchmarks/answer_quality.py`, 18 cases
+(10 factual with checkable answers, 5 instruction-following, 3 unanswerable).
+Evidence to `results/answer_quality/`.
+
+**Why this exists.** The model was selected on `devanagari_ratio` and
+`think_leaks`. Four answers from the measured run all score **1.000 Devanagari**
+while being: correct, a thirteen-fold repetition loop, the opposite of what was
+asked, and an invented fact. The selection metric cannot see any of it, so
+"1.000" has never meant the answers were good — only that the script was.
+
+**The hypothesis.** The bad answers are largely a decoding artefact, not model
+capacity. This pipeline decodes hard greedy (`argmax`), because every
+correctness gate here compares two greedy decoders. Qwen's guidance for these
+models is against greedy decoding precisely because it repeats, and the
+observed loop is that failure exactly.
+
+**Arms**, same checkpoint, same prompts, `seed=0` for every sampled arm:
+
+| arm | settings |
+| --- | --- |
+| `greedy` | temperature 0 — today's serving path |
+| `greedy+penalty` | temperature 0, presence_penalty 0.5 |
+| `sampled` | temperature 0.7, top_p 0.8, top_k 20 |
+| `sampled+penalty` | temperature 0.7, top_p 0.8, top_k 20, presence_penalty 0.5 |
+
+- *Decision rule:* adopt the arm with the highest `instruction_obeyed` **and**
+  zero `looping`, provided its `factual_accuracy` is not below `greedy`'s by
+  more than 10 percentage points and its `devanagari_ratio_mean` stays ≥ 0.99.
+  Ties go to the lower `temperature`, because a sampled serving path is
+  reproducible only with its seed recorded and greedy needs no such caveat.
+- *Greedy remains the reference regardless of the outcome.* Every gate —
+  explicit against `generate()`, static cache against eager, CTranslate2
+  against explicit, served against explicit — decodes greedily on both sides. A
+  sampled serving path does not change that, and this rule does not license
+  changing it.
+- *Prediction:* `looping` goes to zero on both sampled arms and on
+  `greedy+penalty`; `instruction_obeyed` improves most on `sampled+penalty`;
+  `factual_accuracy` drops slightly under sampling. If sampling does **not**
+  fix the loop, the cause is not the decoder and the next suspect is the
+  system prompt.
+- *What this cannot settle:* whether Qwen3-1.7B is good enough. It measures one
+  checkpoint under four decoders. A model comparison needs the same harness run
+  across checkpoints, which is the bake-off that should have been run with this
+  metric in the first place.
+- *Threats to validity, recorded now:* the factual set is small (10 items) and
+  general-knowledge; `declined_rate` rewards refusing, so a model that refuses
+  everything scores 3/3 there while failing every factual case — read the
+  splits together, never `declined_rate` alone.
+
 ## Served-engine sweep, first measured run (2026-09-26)
 
 Colab T4, Qwen3-1.7B, `full-inference-engine` patched for the UTF-8 streaming

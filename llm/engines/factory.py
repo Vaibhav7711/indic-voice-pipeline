@@ -71,6 +71,11 @@ def build_llm(
     quantization: str | None = None,
     static_cache: bool = False,
     compile_decode: bool = False,
+    temperature: float = 0.0,
+    top_p: float = 1.0,
+    top_k: int = 0,
+    presence_penalty: float = 0.0,
+    seed: int | None = None,
     base_url: str | None = None,
     api_key: str | None = None,
     chat: bool = False,
@@ -84,6 +89,13 @@ def build_llm(
     (loading just the tokenizer is cheap and keeps the prompt identical to
     what the explicit path would send — which is the only way the two are
     comparable).
+
+    ``temperature`` defaults to 0.0 -- greedy -- on both engines, because every
+    correctness gate here compares greedy against greedy. It is the wrong
+    default for answer *quality*: Qwen's guidance for these models is against
+    greedy decoding because it repeats, and a measured run produced the same
+    11-character phrase thirteen times. Sampling is therefore available and off
+    until `benchmarks/answer_quality.py` settles it.
 
     ``chat`` defaults to False for the HTTP engine on purpose: the turn has
     already rendered the model's chat template, and letting the server apply
@@ -121,10 +133,16 @@ def build_llm(
         generator = HttpLLMEngine(
             model, base_url=base_url or "http://127.0.0.1:8000/v1",
             api_key=api_key, chat=chat, tokenizer=tokenizer, extra_body=extra_body,
+            temperature=temperature, top_p=top_p, top_k=top_k,
+            presence_penalty=presence_penalty, seed=seed,
         )
         return generator, tokenizer, {"engine": "http", "model": model,
                                       "endpoint": generator.endpoint, "chat": chat,
-                                      "templated_by": "server" if chat else "client"}
+                                      "templated_by": "server" if chat else "client",
+                                      "temperature": temperature, "top_p": top_p,
+                                      "top_k": top_k,
+                                      "presence_penalty": presence_penalty,
+                                      "seed": seed}
 
     from llm import LLMRunner, load_llm
 
@@ -134,9 +152,15 @@ def build_llm(
     # numerics diverge for reasons that say nothing about either engine.
     loaded = load_llm(model, device=device, dtype=dtype, quantization=quantization)
     generator = LLMRunner(loaded.model, loaded.tokenizer, loaded.device,
-                          static_cache=static_cache, compile_decode=compile_decode)
+                          static_cache=static_cache, compile_decode=compile_decode,
+                          temperature=temperature, top_p=top_p, top_k=top_k,
+                          seed=seed)
     return generator, loaded.tokenizer, {
         "engine": "explicit", "model": model, "device": str(loaded.device),
         "dtype": str(loaded.dtype), "quantization": loaded.quantization,
         "static_cache": static_cache, "compile_decode": compile_decode,
+        # Recorded because a correctness gate is only valid while both sides
+        # decode greedily, and these are what say whether they did.
+        "temperature": temperature, "top_p": top_p, "top_k": top_k,
+        "seed": seed,
     }

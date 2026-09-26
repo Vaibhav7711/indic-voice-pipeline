@@ -47,6 +47,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -59,6 +60,23 @@ DEFAULT_PROMPTS = [
     "What is the capital of India?",
     "थोड़ा धीरे बोलो please, मुझे समझ नहीं आया।",
 ]
+
+
+def system_language(prompt: str) -> str:
+    """Which system prompt a prompt should be answered under.
+
+    Every prompt used to get the Hindi one, which instructs the model to answer
+    entirely in Hindi. For the English prompt in the default set that produced
+    `चीनी राजधानी है।` -- "it is the Chinese capital" -- and the parity report
+    then read as a model that cannot name a capital city. The Hindi form of the
+    same question answered correctly in both engines.
+
+    Harmless for the comparison itself, since both engines get the identical
+    prompt either way, and badly misleading for anyone reading the answers.
+    Script is a sufficient signal here: these prompts are written, not
+    transcribed.
+    """
+    return "hi" if re.search(r"[\u0900-\u097F]", prompt) else "en"
 
 
 def common_prefix_length(left: str, right: str) -> int:
@@ -307,7 +325,8 @@ def main(argv: list[str] | None = None) -> int:
         # the same builder the turn uses -- including enable_thinking=False,
         # without which Qwen3 answers from inside <think> and neither engine
         # produces anything speakable.
-        prompt = build_chat_prompt(tokenizer, system_prompt_for("hi"), question)
+        language = system_language(question)
+        prompt = build_chat_prompt(tokenizer, system_prompt_for(language), question)
         reference_text = reference.generate(
             prompt, max_new_tokens=args.max_new_tokens).text
         served_text = served.generate(prompt, max_new_tokens=args.max_new_tokens).text
@@ -315,6 +334,7 @@ def main(argv: list[str] | None = None) -> int:
                              prefix_chars=args.prefix_chars)
         results.append({
             "prompt": question,
+            "system_language": language,
             "reference": reference_text,
             "served": served_text,
             "comparison": comparison,
