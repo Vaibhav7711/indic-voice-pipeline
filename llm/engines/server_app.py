@@ -1,5 +1,16 @@
 """A configurable app factory for the serving engine, owned by this repo.
 
+**Why this lives under `llm/engines/` and not in `scripts/`.** It was in
+`scripts/` and could not be imported. `full-inference-engine` also has a
+top-level `scripts/` directory, and that one is a regular package with an
+`__init__.py` while this repo's is a PEP 420 namespace package. Serving puts
+both checkouts on `PYTHONPATH` with the engine first, and a regular package
+found earlier on the path wins outright -- so `import scripts.server_app`
+resolved to the engine's `scripts/`, which has no such module, and uvicorn
+reported only "Could not import module". Five top-level names collide between
+the two repos (`benchmarks`, `docs`, `results`, `scripts`, `tests`); `llm` is
+unique to this one, so a module here cannot be shadowed.
+
 The engine's own factories take no arguments on purpose: `create_rtx4060_flash_app`
 and the T4 x2 speculative profile encode settings an A/B chose *on that
 architecture*, and a zero-argument factory cannot drift from what was measured.
@@ -15,7 +26,7 @@ so `scripts/serve_llm.py` can set it and the process still starts with a
 zero-argument factory.
 
     LLM_SERVER_MODEL=Qwen/Qwen3-4B LLM_SERVER_NUM_BLOCKS=512 \
-        uvicorn scripts.llm_server_app:create --factory
+        uvicorn llm.engines.server_app:create --factory
 
 Nothing here decides a serving policy. It passes configuration through and
 refuses what it cannot pass through, so a typo in an environment variable

@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import pytest
 
-from scripts.llm_server_app import (
+from llm.engines.server_app import (
     DEFAULTS,
     MODEL_GEOMETRY,
     describe,
@@ -137,3 +137,78 @@ class TestConfigResolution:
         """Each captured bucket costs memory, and 4B has little to spare."""
         assert resolve_config({})["graph_buckets"] == (1, 2)
         assert resolve_config({})["max_active"] == 2
+
+
+class TestItIsNotShadowedByTheEngineCheckout:
+    """Why this module is under `llm/engines/` and not in `scripts/`.
+
+    It was in `scripts/` and could not be imported at all. Serving puts both
+    checkouts on PYTHONPATH with the engine first, and `full-inference-engine`
+    has its own top-level `scripts/` package with an `__init__.py` while this
+    repo's is a PEP 420 namespace package. A regular package found earlier on
+    the path wins outright, so `import scripts.<anything>` resolved to the
+    engine's directory and uvicorn reported only "Could not import module
+    scripts.llm_server_app" -- a name collision presenting as a missing file.
+    """
+
+    def test_the_module_lives_under_a_name_the_engine_does_not_have(self):
+        import llm.engines.server_app as module
+
+        assert module.__name__ == "llm.engines.server_app"
+        assert not module.__name__.startswith("scripts."), (
+            "a `scripts.` module is shadowed by the engine checkout at serve time"
+        )
+
+    def test_the_launcher_points_at_that_module(self):
+        from scripts.serve_llm import DEFAULT_APP
+
+        assert DEFAULT_APP == "llm.engines.server_app:create"
+
+    def test_a_regular_package_earlier_on_the_path_wins(self, tmp_path,
+                                                        monkeypatch):
+        """The mechanism, reproduced. `first` mimics the engine checkout: a
+        real package with an __init__.py. `second` mimics this repo: a
+        namespace package holding the module we want. Importing finds the
+        first and the module is unreachable.
+        """
+        import sys
+
+        first, second = tmp_path / "first", tmp_path / "second"
+        (first / "scripts").mkdir(parents=True)
+        (first / "scripts" / "__init__.py").write_text("")
+        (second / "scripts").mkdir(parents=True)          # no __init__.py
+        (second / "scripts" / "wanted.py").write_text("VALUE = 1\n")
+
+        monkeypatch.syspath_prepend(str(second))
+        monkeypatch.syspath_prepend(str(first))           # engine first
+        for name in [n for n in sys.modules if n == "scripts"
+                     or n.startswith("scripts.")]:
+            monkeypatch.delitem(sys.modules, name, raising=False)
+
+        import scripts
+
+        assert scripts.__file__ is not None, "the regular package won"
+        assert str(first) in scripts.__file__
+        with pytest.raises(ModuleNotFoundError):
+            import scripts.wanted  # noqa: F401 - the shadowed module
+
+    def test_a_uniquely_named_package_is_reachable_either_way(self, tmp_path,
+                                                             monkeypatch):
+        """The fix: a top-level name the other checkout does not have."""
+        import sys
+
+        first, second = tmp_path / "first", tmp_path / "second"
+        (first / "scripts").mkdir(parents=True)
+        (first / "scripts" / "__init__.py").write_text("")
+        (second / "uniquepkg").mkdir(parents=True)
+        (second / "uniquepkg" / "__init__.py").write_text("")
+        (second / "uniquepkg" / "wanted.py").write_text("VALUE = 1\n")
+
+        monkeypatch.syspath_prepend(str(second))
+        monkeypatch.syspath_prepend(str(first))
+        for name in [n for n in sys.modules if n.startswith("uniquepkg")]:
+            monkeypatch.delitem(sys.modules, name, raising=False)
+
+        import uniquepkg.wanted
+
+        assert uniquepkg.wanted.VALUE == 1

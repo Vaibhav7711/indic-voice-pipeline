@@ -189,7 +189,7 @@ def main(argv: list[str] | None = None) -> int:
                              "not over the same numerics and will diverge for "
                              "reasons that have nothing to do with the engine. "
                              "Defaults to float16 because that is what "
-                             "scripts/llm_server_app.py serves")
+                             "llm/engines/server_app.py serves")
     parser.add_argument("--prompt", action="append", default=[], dest="prompts")
     parser.add_argument("--out", default="results/engine_parity/parity.json")
     parser.add_argument("--note", default="")

@@ -36,7 +36,7 @@ underneath. `pipeline/memory.py` has the budget.
 Blocks are the thing to size: `num_blocks * block_size` is the total KV token
 capacity across all concurrent requests. At Qwen3-4B's 144 KiB per cached
 token the engine's 1024x16 default costs 2.25 GiB; a voice agent is one
-stream with an <=800-token prompt, so `scripts/llm_server_app.py` defaults to
+stream with an <=800-token prompt, so `llm/engines/server_app.py` defaults to
 512x16 = 8192 tokens (1.125 GiB) and prints the arithmetic before allocating.
 """
 
@@ -55,7 +55,11 @@ import urllib.request
 #: This repo's configurable factory, so a model and a pool size can be chosen.
 #: The engine's own zero-argument profiles stay available through `--app`, and
 #: are the right choice on an architecture they were measured on.
-DEFAULT_APP = "scripts.llm_server_app:create"
+#:
+#: Deliberately not under `scripts.`: the engine checkout has its own
+#: top-level `scripts/` package which shadows this repo's namespace package
+#: when both are on PYTHONPATH. See llm/engines/server_app.py.
+DEFAULT_APP = "llm.engines.server_app:create"
 DEFAULT_PORT = 8000
 
 
@@ -212,7 +216,7 @@ def main(argv: list[str] | None = None) -> int:
     if chosen:
         print("configuration:", chosen, flush=True)
     if args.app == DEFAULT_APP:
-        from scripts.llm_server_app import describe, resolve_config
+        from llm.engines.server_app import describe, resolve_config
 
         # Printed before the allocation, so an out-of-memory death is a number
         # someone chose rather than a surprise.

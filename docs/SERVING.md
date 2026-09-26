@@ -61,7 +61,7 @@ Three facts to hold together when reading any result from it:
 
 | | |
 | --- | --- |
-| **VRAM** | ~7.5 GiB weights + 144 KiB per cached KV token. `scripts/llm_server_app.py` defaults to a 512 × 16 = 8192-token pool (1.125 GiB) rather than the engine's 1024 × 16 (2.25 GiB), because a voice agent is one stream with an ≤800-token prompt. Fits a 15 GB T4 beside Whisper; **does not fit an 8 GB card** in fp16 — use `--llm-model Qwen/Qwen3-0.6B` or a quantized path there. |
+| **VRAM** | ~7.5 GiB weights + 144 KiB per cached KV token. `llm/engines/server_app.py` defaults to a 512 × 16 = 8192-token pool (1.125 GiB) rather than the engine's 1024 × 16 (2.25 GiB), because a voice agent is one stream with an ≤800-token prompt. Fits a 15 GB T4 beside Whisper; **does not fit an 8 GB card** in fp16 — use `--llm-model Qwen/Qwen3-0.6B` or a quantized path there. |
 | **Latency, measured** | The T4 bake-off measured first-sentence p50 at **1744 ms for 0.6B and 3553 ms for 4B** on the explicit runner. Moving to 4B therefore roughly doubles the metric this project is trying to reduce, *unless* the engine recovers more than 2×. That is the bet, and it is what the pre-registered sweep tests. |
 | **Speculative decoding is not available here** | The mechanism that could most plausibly pay for 4B's decode cost — a 0.6B draft — needs two GPUs: `create_app` raises when target and draft share a device, and the profile for it is `create_kaggle_t4x2_speculative_app`. The engine's own record also notes the 0.6B drafter did not beat target-only on the measured T4. So on one card, 4B's win has to come from CUDA-graphed decode and chunked prefill alone. |
 
@@ -113,7 +113,7 @@ The same run had a second, independent flaw: the reference loaded **bfloat16**
 Two greedy decoders over different numerics diverge for reasons that say
 nothing about either engine. `scripts/engine_parity.py --dtype` now sets the
 reference explicitly, defaults to `float16` to match
-`scripts/llm_server_app.py`, and records both dtypes in the report so a
+`llm/engines/server_app.py`, and records both dtypes in the report so a
 mismatch can be checked for afterwards.
 
 **On token agreement.** A greedy decoder diverges at the first step where two
@@ -138,7 +138,7 @@ python scripts/live_agent.py --llm-engine http \
     --llm-base-url http://127.0.0.1:8000/v1
 ```
 
-The default `--app` is `scripts/llm_server_app.py`, this repo's factory: it
+The default `--app` is `llm.engines.server_app:create`, this repo's factory: it
 takes `--model`, `--num-blocks`, `--block-size`, `--max-active` and
 `--graph-buckets`, and prints the pool's cost in GiB before allocating it, so
 an out-of-memory death is a number someone chose rather than a surprise.
@@ -192,7 +192,7 @@ with `max_active=2` — one in-flight request, plus one so a barge-in's
 replacement turn does not queue behind the request it cancelled.
 
 Size the KV pool with `num_blocks × block_size` = total KV tokens across all
-concurrent requests. `scripts/llm_server_app.py` prints the arithmetic, and
+concurrent requests. `llm/engines/server_app.py` prints the arithmetic, and
 reports `None` rather than a plausible figure for a checkpoint whose geometry
 it does not have recorded — a made-up VRAM number is worse than none, because
 it gets acted on.

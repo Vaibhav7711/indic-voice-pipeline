@@ -7,7 +7,7 @@ Qwen3-4B fp16 is ~7.5 GiB of weights plus a paged KV pool at 144 KiB per
 cached token, so it is concurrent with Whisper on a 15 GiB T4 and does not
 fit an 8 GiB card at all. When it is served by the external engine it is in
 another process and invisible to this module's snapshot: two CUDA contexts,
-no shared allocator, and the pool sized by `scripts/llm_server_app.py`
+no shared allocator, and the pool sized by `llm/engines/server_app.py`
 instead. Use `--llm-model Qwen/Qwen3-0.6B` on a small card.
 """
 
