@@ -456,10 +456,15 @@ token-budget bug that inflated earlier numbers, in `docs/EXPERIMENTS.md`.
 | --- | ---: | ---: | ---: | ---: |
 | whisper-medium base | 40.43% | 16.74% | 2461 ms | 0.230 |
 | medium + LoRA v1 | 25.82% | 9.61% | 2540 ms | 0.238 |
-| large-v3-turbo base | 30.40% | 11.55% | 1238 ms | 0.117 |
-| **turbo + LoRA v2 (measured; unpublished artifact)** | **23.83%** | **8.43%** | **694 ms** | **0.066** |
+| large-v3-turbo base † | 30.40% | 11.55% | 1238 ms | 0.117 |
+| **turbo + LoRA v2 (measured; unpublished artifact)** | **23.83%** | **8.46%** | **766 ms** | **0.073** |
 
-v2 is both better and 3.7× faster: `large-v3-turbo` keeps large-v3's encoder
+Evidence: `results/eval/medium-base-test-300-seed0/`,
+`results/eval/medium-lora-test-300-seed0/`, `results/eval/v2-guards-on/`. Those
+three rows match their evidence to the decimal. † The turbo-base row has no
+committed evidence and is not checkable; see `docs/EXPERIMENTS.md`.
+
+v2 is both better and 3.2× faster: `large-v3-turbo` keeps large-v3's encoder
 and distils the decoder to 4 layers, and ASR decode is the dominant term in
 the agent's response latency.
 

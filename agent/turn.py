@@ -431,6 +431,15 @@ class VoiceTurn:
             result.error = playback_result.error
         elif playback_result.interrupted:
             self.state = TurnState.INTERRUPTED
+        elif errors.get("tts") and playback_result.chunks_written == 0:
+            # Synthesis raised and nothing reached the sink. Playback consumed
+            # an empty iterable, so it reports COMPLETED and not interrupted --
+            # and a completed turn hands its whole response to the dialogue
+            # history as though it had been spoken. Every later prompt would
+            # then claim the agent said something the user never heard, which
+            # is the one thing `agent.conversation` promises it never does.
+            self.state = TurnState.FAILED
+            result.error = "; ".join(f"{k}: {v}" for k, v in errors.items())
         else:
             self.state = TurnState.COMPLETED
             if errors:

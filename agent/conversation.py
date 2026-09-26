@@ -30,7 +30,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-__all__ = ["Exchange", "Conversation", "spoken_text"]
+__all__ = ["Exchange", "Conversation", "spoken_text", "heard_nothing"]
 
 #: Appended to an assistant message the user interrupted, so the model can
 #: see the difference between "I said this" and "I started saying this".
@@ -55,6 +55,25 @@ class Exchange:
     def as_dict(self) -> dict:
         return {"user": self.user, "assistant": self.assistant,
                 "interrupted": self.interrupted}
+
+
+def heard_nothing(result) -> bool:
+    """True when the turn had something to say and no audio reached the sink.
+
+    A second line of defence behind the turn's own state machine. `spoken_text`
+    returns the *whole* response for any state that is not "interrupted", so a
+    turn that produced text and no audio would enter the history as spoken. The
+    check is on bytes actually written rather than on an error field, because
+    the failure that matters is silence, whatever caused it.
+
+    An empty response is not this case -- there was nothing to say, and the
+    empty-turn path already refuses it.
+    """
+    response = (getattr(result, "response", "") or "").strip()
+    if not response:
+        return False
+    written = getattr(getattr(result, "playback", None), "bytes_written", None)
+    return written == 0
 
 
 def spoken_text(result) -> tuple[str, bool]:
@@ -110,6 +129,8 @@ class Conversation:
     def record_turn(self, result) -> bool:
         """Record a :class:`agent.turn.TurnResult`, keeping only what was heard."""
         if getattr(getattr(result, "state", None), "value", "") == "failed":
+            return False
+        if heard_nothing(result):
             return False
         spoken, interrupted = spoken_text(result)
         return self.record(getattr(result, "transcript", "") or "", spoken,

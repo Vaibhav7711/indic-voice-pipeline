@@ -255,8 +255,10 @@ Consequences:
 
 `openai/whisper-large-v3-turbo`, no adapter, on the same seed-0 300-clip
 subset as the v1 evaluation (Tesla T4, fp16, `standard` normalization).
-Evidence: `results/eval/turbo-base-test-300-seed0/` (run from Colab at
-commit `e0daacb`; to be committed with the next evidence drop).
+Evidence: `results/eval/turbo-base-test-300-seed0/` — **never committed, and
+absent from this repository.** The comparison below therefore rests on numbers
+that cannot be checked. It informed a decision that has already been taken and
+is retained for that reason; re-run it before citing it again.
 
 | Model | WER | CER | p50 latency | RTF |
 | --- | ---: | ---: | ---: | ---: |
@@ -293,17 +295,32 @@ recorded against these.
 `--preset v2-turbo`: v1's recipe with the base model swapped (decision and
 rationale above). The measured adapter was at the ephemeral path
 `/kaggle/working/v2-final/best` and its checkpoint repo was private, so the
-weights are not obtainable or reproducible from this checkout. Evidence from
-that run:
-`results/eval/turbo-lora-v2-test-300-seed0-full/` (seed 0, 300 clips,
-`standard`, Tesla T4, fp16, commit `55f5c1e`).
+weights are not obtainable or reproducible from this checkout. Evidence:
+`results/eval/v2-guards-on/` (seed 0, 300 clips, `standard`, Tesla T4, fp16,
+commit `31a842f`, `git_dirty: true`, adapter `/content/v2-final/best`).
+
+The directory this entry previously cited,
+`results/eval/turbo-lora-v2-test-300-seed0-full/`, was never committed and does
+not exist in this repository. It also reported a lower CER and latency than the
+run that *is* committed (8.43% / 694 ms / RTF 0.066 against 8.46% / 766 ms /
+0.073). The sensitivity ladder and every error-category share in this entry
+match `v2-guards-on` exactly, so the three latency-and-CER figures were
+transcribed from a run that cannot be checked. **The committed numbers are the
+ones stated below**, per this ledger's own rule that every number come from the
+harness with its `run_config.json` retained beside it. If the uncommitted run
+is real it has to be committed to be cited.
 
 | Model | WER | CER | p50 | RTF |
 | --- | ---: | ---: | ---: | ---: |
 | medium base | 40.43% | 16.74% | 2461 ms | 0.230 |
 | medium + v1 | 25.82% | 9.61% | 2540 ms | 0.238 |
-| turbo base | 30.40% | 11.55% | 1238 ms | 0.117 |
-| **turbo + v2** | **23.83%** | **8.43%** | **694 ms** | **0.066** |
+| turbo base † | 30.40% | 11.55% | 1238 ms | 0.117 |
+| **turbo + v2** | **23.83%** | **8.46%** | **766 ms** | **0.073** |
+
+† No committed evidence: `results/eval/turbo-base-test-300-seed0/` does not
+exist in this repository. Every row whose evidence *is* committed matches it to
+the decimal; this row and the previously published v2 latency are the two that
+do not, and both come from Colab runs that were never persisted.
 
 Sensitivity: raw 24.83% / orthography-blind 22.54% (formatting 1.0 pt,
 orthography 1.29 pts — both back in line with v1 after fine-tuning, versus
@@ -344,8 +361,8 @@ WER target of 22.0% by 1.8 points, so it is *accepted but not final*:
 | Criterion | Target | v2 | |
 | --- | --- | --- | --- |
 | Test WER | ≤ 22.0% | 23.83% | miss |
-| Test CER | ≤ 8.5% | 8.43% | pass |
-| p50 ASR latency | ≤ 1.35 s | 694 ms | pass |
+| Test CER | ≤ 8.5% | 8.46% | pass (by 0.04 pt) |
+| p50 ASR latency | ≤ 1.35 s | 766 ms | pass |
 | `deletion_run` | ≤ 63 | 21 | pass |
 | Unrestricted language detection | `hi` | `hi` | pass |
 

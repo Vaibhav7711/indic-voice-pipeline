@@ -17,6 +17,27 @@ What follows is what remains. Severity is the auditor's; `location` is
 
 ## Remaining: 16 confirmed + 6 from the completeness critique
 
+**Resolved since the audit** (this list is the audit's, not a live tracker, so
+the findings below are left in place with their original text and annotated):
+
+- *README waterfall table matches no value in its cited evidence* — **fixed.**
+  The table now carries the committed figures (14.4 / 80.4 / 1900.2 / 105.0 /
+  2323.6 ms, total 4514.5, audio→first token 2159.3, peak 2.6 GiB) and cites
+  commit `21ebce7`.
+- *Shipped v2 metrics cite evidence directories that do not exist* — **fixed**
+  by correcting the numbers rather than the citation. `results/eval/v2-guards-on/`
+  is committed and holds the run; three of the four published figures did not
+  match it (CER 8.43 → 8.46%, p50 694 → 766 ms, RTF 0.066 → 0.073) and the
+  README's "3.7× faster" became 3.2×. The turbo-base row still has no committed
+  evidence and is now marked as such.
+- *A TTS failure records the unspoken response as heard* — **fixed** in
+  `agent/turn.py` (a synthesis error with zero chunks written is a FAILED turn)
+  and independently in `Conversation.record_turn` (a result that wrote no bytes
+  is refused whatever its state). `tests/test_turn_honesty.py`.
+- *MIT claimed with no LICENSE file* — **LICENSE added.** The blank model card
+  on the shipped weights remains open, and is part of the unobtainable-weights
+  blocker.
+
 
 ## doc_accuracy
 
