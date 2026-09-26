@@ -118,9 +118,26 @@ def main() -> int:
         synth = MmsTtsSynthesizer(args.language)
         print(f"tts warm-up {synth.warm_up():.0f} ms")
     if args.llm_engine == "http":
-        # Fail at startup, not mid-turn, if the endpoint is not serving.
+        # Fail at startup, not mid-turn, if the endpoint is not serving. And
+        # fail in one readable line: a dead server reaches this as a urllib
+        # traceback forty lines deep, which reads like a bug in the client.
+        # Nothing watches the server after its warmup, so it dying mid-session
+        # is a normal thing to hit here.
         print("probing the llm endpoint…", flush=True)
-        print(llm_runner.probe())
+        try:
+            print(llm_runner.probe())
+        except OSError as error:
+            detail = getattr(llm_runner.last_metrics, "error", None) or error
+            print(f"\nerror: the llm endpoint at {args.llm_base_url} is not "
+                  f"answering ({detail}).", file=sys.stderr)
+            print("Start it, or drop --llm-engine http to run the turn from a "
+                  "locally loaded model:\n"
+                  "  python scripts/serve_llm.py --engine-root "
+                  "../full-inference-engine\n"
+                  "The live conversation tests do not need the server -- they "
+                  "exercise streaming, barge-in and dialogue memory, none of "
+                  "which depend on where the LLM runs.", file=sys.stderr)
+            return 2
     elif args.llm_compile:
         llm_runner.generate("नमस्ते", max_new_tokens=4)          # graph capture off the first turn
 
