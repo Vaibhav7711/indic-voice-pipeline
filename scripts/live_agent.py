@@ -67,8 +67,16 @@ def main() -> int:
     parser.add_argument("--device", default=None, help="cuda / cpu (default: auto)")
     parser.add_argument("--whisper-dtype", default=None, choices=[None, "float16", "float32"])
     parser.add_argument("--output-device", default=None)
-    parser.add_argument("--sink", default="device", choices=["device", "buffer"],
-                        help="buffer: capture audio in memory instead of a sound device (headless GPU boxes)")
+    parser.add_argument("--sink", default="device",
+                        choices=["device", "buffer", "paced"],
+                        help="buffer: capture audio in memory instead of a sound "
+                             "device (headless GPU boxes), consumed instantly. "
+                             "paced: the same, but taking as long as the audio "
+                             "lasts -- required to test barge-in without a sound "
+                             "card, since an instant sink leaves nothing to "
+                             "interrupt")
+    parser.add_argument("--sink-speed", type=float, default=1.0,
+                        help="paced sink only; >1 plays faster than real time")
     parser.add_argument("--incremental-finals", action="store_true")
     parser.add_argument("--semantic-endpointing", action="store_true")
     parser.add_argument("--log", default="results/live/turns.jsonl")
@@ -122,7 +130,12 @@ def main() -> int:
         semantic_endpointing=args.semantic_endpointing,
     )
     session = StreamingSession(asr, config)
-    if args.sink == "buffer":
+    if args.sink == "paced":
+        from agent.audio import PacedBufferSink
+
+        def sink_factory():
+            return PacedBufferSink(synth.format, speed=args.sink_speed)
+    elif args.sink == "buffer":
         from agent.audio import DecodingBufferSink
 
         def sink_factory():

@@ -21,6 +21,8 @@ otherwise let play are the difference between an interruption and a stumble.
 
 from __future__ import annotations
 
+import threading
+import time
 from collections.abc import Callable
 from dataclasses import dataclass
 
@@ -32,6 +34,7 @@ __all__ = [
     "PCM16_16K",
     "Mp3Decoder",
     "DecodingBufferSink",
+    "PacedBufferSink",
     "SoundDeviceSink",
 ]
 
@@ -181,6 +184,66 @@ class DecodingBufferSink:
     @property
     def seconds(self) -> float:
         return self.audio.size / self.target_rate
+
+
+class PacedBufferSink(DecodingBufferSink):
+    """A buffer sink that takes as long to "play" as the audio actually lasts.
+
+    `DecodingBufferSink` consumes every chunk instantly, which is right for
+    checking *what* was synthesised and wrong for anything that depends on the
+    agent still speaking. Barge-in is exactly that: a headless turn finishes in
+    milliseconds, so there is nothing left to interrupt, and barge-in could only
+    ever be tested on a machine with a sound card. This sink closes that gap --
+    it decodes like its parent and then waits out the audio's real duration, so
+    a GPU box with no audio hardware can run the same test a laptop with
+    speakers would.
+
+    The wait is on an `Event`, not `sleep`: `stop()` has to cut playback
+    promptly or a barge-in would be recorded while the sink kept "playing" the
+    sentence the user interrupted, and the measured cancel latency would be the
+    length of the audio rather than the length of the cancel.
+
+    It tracks wall-clock rather than trusting the decoder: `elapsed` and
+    `played_seconds` together say whether pacing actually happened, which is
+    what a test should assert rather than assuming.
+    """
+
+    def __init__(self, fmt: AudioFormat = MP3_24K, target_rate: int | None = None,
+                 *, speed: float = 1.0, clock: Callable[[], float] | None = None,
+                 waiter: Callable[[float], bool] | None = None):
+        super().__init__(fmt, target_rate)
+        if speed <= 0:
+            raise ValueError(f"speed must be positive, got {speed}")
+        #: >1 plays faster than real time. For a test that wants ordering
+        #: without the wall-clock cost; 1.0 is the honest default.
+        self.speed = speed
+        self._clock = clock or time.monotonic
+        self._cancel = threading.Event()
+        self._waiter = waiter or (lambda seconds: self._cancel.wait(seconds))
+        self.paced_seconds = 0.0
+        self.started_at: float | None = None
+
+    def write(self, chunk: bytes) -> None:
+        before = self.audio.size
+        super().write(chunk)
+        if self.started_at is None:
+            self.started_at = self._clock()
+        gained = (self.audio.size - before) / self.target_rate
+        if gained <= 0:
+            return
+        self.paced_seconds += gained
+        self._waiter(gained / self.speed)
+
+    def stop(self) -> None:
+        # Released before the flag is set, so a writer blocked in the wait
+        # returns immediately rather than after the current chunk's duration.
+        self._cancel.set()
+        super().stop()
+
+    @property
+    def elapsed(self) -> float:
+        """Wall-clock since the first chunk, or 0.0 before one arrived."""
+        return 0.0 if self.started_at is None else self._clock() - self.started_at
 
 
 class SoundDeviceSink:

@@ -216,6 +216,97 @@ reports `None` rather than a plausible figure for a checkpoint whose geometry
 it does not have recorded — a made-up VRAM number is worse than none, because
 it gets acted on.
 
+## Full live test: streaming, barge-in, follow-up turns
+
+Everything measured so far has been request/response — one clip in, one answer
+out. Barge-in and multi-turn dialogue were untested, and not by oversight: a
+headless sink consumes audio instantly, so a turn finishes in milliseconds and
+there is **nothing still playing to interrupt**. Barge-in could only be reached
+on a machine with a sound card.
+
+`agent.audio.PacedBufferSink` closes that. It decodes like `DecodingBufferSink`
+and then waits out the audio's real duration, so a GPU box with no audio
+hardware behaves like one with speakers in the time domain. `stop()` releases a
+blocked writer immediately rather than waiting out the chunk it is
+interrupting — otherwise the measured cancel latency is the length of the
+sentence, not the length of the cancel.
+
+### What runs where
+
+| | needs | covers |
+| --- | --- | --- |
+| `--input-wav … --sink paced` on any GPU box | GPU, no audio hardware | streaming VAD, endpointing, turn pipelining, **barge-in**, **follow-up turns**, dialogue memory |
+| `--sink device` with a real microphone | GPU **and** mic/speakers | all of the above, plus device-level cancellation and acoustic conditions |
+
+The first covers every behaviour in the state machine. The second is the only
+way to test that the speaker actually goes quiet, and that recognition survives
+a room — which is why `docs/AGENT_BRIEF.md` lists device-level barge-in as
+requiring a human.
+
+### Running it
+
+```bash
+# 1. build a scripted conversation (uses the project's own TTS)
+python scripts/make_conversation_wav.py --preset followup --out results/live/followup.wav
+python scripts/make_conversation_wav.py --preset bargein  --out results/live/bargein.wav
+python scripts/make_conversation_wav.py --preset memory   --out results/live/memory.wav
+
+# 2. replay each as the microphone
+python scripts/live_agent.py --input-wav results/live/followup.wav \
+    --sink paced --max-turns 2 --log results/live/followup.jsonl
+
+python scripts/live_agent.py --input-wav results/live/bargein.wav \
+    --sink paced --max-turns 2 --log results/live/bargein.jsonl
+```
+
+Add `--llm-engine http --llm-base-url …` to run the turn against the serving
+engine, and `--asr-engine ct2 --ct2-model …` for the quantized ASR tier. The
+audio path is identical either way.
+
+### What each preset proves, and what to look for
+
+**`followup`** — two turns, 6 s apart, the second (*वहाँ की आबादी कितनी है?*)
+resolvable only against the first. Expect two `FINAL` lines, two turn records,
+and the printed history growing to 2 turns. If the second answer ignores
+*वहाँ*, dialogue memory is not reaching the prompt.
+
+**`bargein`** — the second utterance starts 1.2 s after the first ends, while
+the reply is still playing. Expect `[barge-in: user started speaking]` on
+stdout, `barge_in: true` in the first turn's record, and — the part that
+matters — the first turn's response recorded in history **truncated to what was
+actually spoken**, with the `…` marker. A full response in history after a
+barge-in means the agent believes it said something the user never heard.
+
+**`memory`** — three turns with a pronoun chain, to check the history window
+survives more than one exchange.
+
+**`single`** — a control. If this fails the problem is not conversational.
+
+### Reading the log
+
+```python
+import json
+rows = [json.loads(l) for l in open('results/live/bargein.jsonl')]
+for r in rows:
+    m = r['metrics']
+    print(r['state'], '| barge_in:', m['barge_in'],
+          '| stopped_by_barge_in:', m['llm_stopped_by_barge_in'],
+          '| recorded:', m['recorded_in_history'])
+    print('  Q:', r['transcript'])
+    print('  A:', r['response'][:100])
+```
+
+`barge_in` without `llm_stopped_by_barge_in` means playback was cancelled but
+the decode ran on — tokens generated for audio nobody heard. Both should be
+true on a genuine interruption of a streaming backend.
+
+### What this does not measure
+
+The input is synthetic speech: no room, no clipping, no breath, and cleaner
+than any microphone. These runs test whether the conversation *plumbing* works.
+Recognition accuracy comes from `benchmarks/streaming_eval.py` on real recorded
+speech — a clean WER here would not mean the ASR is good.
+
 ## Answer quality is a separate question from serving
 
 The engine changes how fast a token arrives, not what the token is. Both
