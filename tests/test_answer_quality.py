@@ -189,3 +189,71 @@ class TestBrevity:
         result = score(case_for("एक वाक्य में"), "योग एक प्राचीन भारतीय अभ्यास है।")
         assert result.too_long is False
         assert result.obeyed is True
+
+
+class TestSystemPromptVariants:
+    """The one lever left untested after sampling was measured and refuted.
+
+    Instruction-following measured 80% while 0 of 3 unanswerable cases were
+    declined: the model obeys the prompt, and the prompt never asked it to
+    admit ignorance. It answered "3:45 बजे" to a question about the time with
+    no clock.
+    """
+
+    def test_grounded_extends_the_default_rather_than_replacing_it(self):
+        """The brevity and script instructions are load-bearing -- 80% obeyed
+        and zero over-long answers -- so the variant must add to them."""
+        from llm.prompting import system_prompt_for
+
+        default = system_prompt_for("hi")
+        grounded = system_prompt_for("hi", "grounded")
+        assert grounded.startswith(default)
+        assert len(grounded) > len(default)
+
+    def test_it_tells_the_model_not_to_invent(self):
+        from llm.prompting import system_prompt_for
+
+        grounded = system_prompt_for("hi", "grounded")
+        assert "नहीं पता" in grounded
+        assert "मत गढ़िए" in grounded
+
+    def test_the_instruction_generalises_past_the_cases_it_was_written_for(self):
+        """Time, weather and private data appear as examples, not as the rule.
+        A variant that only named them would be an overfit to three cases."""
+        from llm.prompting import GROUNDED_SUFFIX
+
+        english = GROUNDED_SUFFIX[None]
+        assert "do not know" in english
+        assert "Never invent a fact" in english
+
+    def test_every_language_has_a_grounded_form(self):
+        from llm.prompting import SYSTEM_PROMPTS, system_prompt_for
+
+        for language in SYSTEM_PROMPTS:
+            grounded = system_prompt_for(language, "grounded")
+            assert grounded != system_prompt_for(language)
+
+    def test_the_default_variant_is_byte_identical_to_before(self):
+        """Adding a variant must not change what the pipeline already serves,
+        or every recorded number becomes incomparable."""
+        from llm.prompting import SYSTEM_PROMPTS, system_prompt_for
+
+        for language, expected in SYSTEM_PROMPTS.items():
+            assert system_prompt_for(language) == expected
+            assert system_prompt_for(language, "default") == expected
+
+    def test_an_unknown_variant_is_refused(self):
+        import pytest
+
+        from llm.prompting import system_prompt_for
+
+        with pytest.raises(ValueError, match="variant"):
+            system_prompt_for("hi", "grouded")
+
+    def test_the_refusal_names_the_options(self):
+        import pytest
+
+        from llm.prompting import system_prompt_for
+
+        with pytest.raises(ValueError, match="grounded"):
+            system_prompt_for("hi", "nope")

@@ -8,7 +8,8 @@ is empty. Having a single builder means a template fix lands everywhere.
 
 from __future__ import annotations
 
-__all__ = ["SYSTEM_PROMPTS", "system_prompt_for", "build_chat_prompt",
+__all__ = ["SYSTEM_PROMPTS", "GROUNDED_SUFFIX", "SYSTEM_VARIANTS",
+           "system_prompt_for", "build_chat_prompt",
            "render_messages"]
 
 
@@ -37,8 +38,54 @@ SYSTEM_PROMPTS: dict[str | None, str] = {
 }
 
 
-def system_prompt_for(language: str | None) -> str:
-    return SYSTEM_PROMPTS.get(language, SYSTEM_PROMPTS[None])
+#: Added by the ``grounded`` variant. The measured run is the reason: asked the
+#: time with no clock the assistant answered "3:45 बजे", and asked the weather
+#: with no weather data, "खुशी से बराबर है" -- 0 of 3 unanswerable cases
+#: declined. Inventing a plausible answer is worse than refusing, because it
+#: sounds like an answer and a listener has no way to tell.
+#:
+#: Deliberately general rather than a list of the cases it was written for.
+#: Naming "the time, the weather, your accounts" as examples rather than as the
+#: rule is the difference between an instruction and an overfit.
+GROUNDED_SUFFIX = {
+    "hi": (
+        " अगर आपको उत्तर नहीं पता, या उत्तर के लिए ऐसी जानकारी चाहिए जो आपके "
+        "पास नहीं है — जैसे अभी का समय, आज का मौसम, या उपयोगकर्ता की निजी "
+        "जानकारी — तो संक्षेप में कहिए कि आपको नहीं पता। कोई तथ्य मत गढ़िए।"
+    ),
+    "te": (
+        " సమాధానం తెలియకపోతే, లేదా సమాధానానికి మీ వద్ద లేని సమాచారం "
+        "అవసరమైతే, తెలియదని క్లుప్తంగా చెప్పండి. వాస్తవాలను కల్పించవద్దు."
+    ),
+    None: (
+        " If you do not know the answer, or it needs information you do not "
+        "have -- the current time, today's weather, the user's private data -- "
+        "say briefly that you do not know. Never invent a fact."
+    ),
+}
+
+#: Named system-prompt variants, so an A/B records which one it ran rather than
+#: leaving it to be inferred from a commit date.
+SYSTEM_VARIANTS = ("default", "grounded")
+
+
+def system_prompt_for(language: str | None, variant: str = "default") -> str:
+    """The system prompt for a language, in a named variant.
+
+    ``default`` is what the pipeline has always served. ``grounded`` appends an
+    instruction to admit ignorance instead of inventing, which is the one
+    untested lever left after sampling was measured and refuted:
+    instruction-following was 80% while 0 of 3 unanswerable cases were
+    declined, so the model obeys the prompt and the prompt never asked.
+    """
+    if variant not in SYSTEM_VARIANTS:
+        raise ValueError(f"system prompt variant must be one of "
+                         f"{SYSTEM_VARIANTS}, got {variant!r}")
+    base = SYSTEM_PROMPTS.get(language, SYSTEM_PROMPTS[None])
+    if variant == "default":
+        return base
+    suffix = GROUNDED_SUFFIX.get(language, GROUNDED_SUFFIX[None])
+    return base + suffix
 
 
 def build_chat_prompt(tokenizer, system: str, user: str) -> str:

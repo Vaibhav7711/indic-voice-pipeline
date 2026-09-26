@@ -553,6 +553,68 @@ until a speakable unit, not TTS synthesis. The live records do not record the
 selected LLM, TTS backend, GPU, or notebook commit, so this is a real
 distribution but not a configuration-comparison result.
 
+## Pre-registered: the grounded system prompt, and the parity margins (registered 2026-09-26)
+
+Both registered after run 2 and before either is run. Run 2 refuted the
+sampling hypothesis, so these are what remain.
+
+### The grounded system prompt
+
+Run 2 split the quality problem cleanly: **instruction-following 80% with zero
+over-long answers, factual accuracy 4/10, and 0 of 3 unanswerable cases
+declined.** The model obeys the prompt. The prompt never asked it to admit
+ignorance, so it invented a clock time (*3:45 बजे*) and a weather report
+(*खुशी से बराबर है*).
+
+`system_prompt_for(language, "grounded")` appends an instruction to say so
+instead of inventing. Harness: `benchmarks/answer_quality.py --system-variant
+grounded`, same 18 cases, greedy, against run 2's `greedy` arm as the control.
+
+- *Decision rule:* adopt `grounded` as the default if `declined_rate` reaches
+  **≥ 2 of 3** and neither `factual_accuracy` nor `instruction_obeyed` falls by
+  more than 10 percentage points. A refusal instruction that also makes the
+  model refuse answerable questions is a worse assistant, not a better one, and
+  `factual_accuracy` is what would show that.
+- *Prediction:* `declined_rate` goes to 2/3 or 3/3; `factual_accuracy` moves by
+  less than 10 pp in either direction; `instruction_obeyed` unchanged. If
+  `declined_rate` stays at 0, the model is not following the instruction and
+  prompting is exhausted as a lever — the next step is then a larger checkpoint,
+  not more prompt wording.
+- *What it cannot fix:* the 6 of 10 wrong facts. Lisbon for the capital of
+  France is not an ignorance problem the model knows it has; nothing in a system
+  prompt reaches it.
+- *Threat to validity:* three unanswerable cases is a small sample, and
+  `declined_rate` rewards refusing. Read it beside `factual_accuracy` — a model
+  that refuses everything scores 3/3 and fails all ten factual cases.
+
+### Parity margins: is the remaining divergence a near-tie?
+
+The gate is 4/5 with matched dtypes and zero corruption, and cannot say whether
+that matters. `scripts/logit_margins.py` runs the reference greedily, records
+the top-two logit margin at every step, finds the first step whose decode stops
+being a prefix of the served text, and reports the margin there. Only the
+reference is loaded — the served text comes from the parity report — so this
+fits a single T4, which is what blocked it before.
+
+- *Decision rule:* if **every** divergence sits below 25% of that run's median
+  margin, the engine agrees with the reference wherever the reference was
+  confident, which is as much as fp16 permits; record the gate as **passing on
+  the margin criterion** and adopt the engine at its measured 2.7365×. If **any
+  one** divergence is at or above that fraction, the engine chose a token the
+  reference considered clearly worse: that is a defect, the engine is not
+  adopted, and the divergent step is the place to look.
+- *Why relative and not absolute:* logit scale varies by model and by position,
+  so the same absolute margin is a coin flip in one run and decisive in another.
+  The 25% is a judgement, stated in the script as `NEAR_TIE_FRACTION` so it can
+  be argued with rather than discovered.
+- *Prediction:* all divergences come back near-ties. The engine's own token
+  identity gate against stock Transformers passes, its optimizations were each
+  A/B-ed against it, and chunked prefill reordering fp16 accumulation is a
+  sufficient explanation. A `clear` verdict would be genuinely surprising and
+  would mean looking at prefill chunking first.
+- *Unanimity is required on purpose:* one confident divergence is a defect
+  whatever the others were, so the rule does not average.
+
 ## Live conversation, dtype-clean sweep, and the sampling arms (2026-09-26, run 2)
 
 Colab T4, Qwen3-1.7B, engine patched. Evidence: `results/live/{followup,bargein}.jsonl`

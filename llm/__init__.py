@@ -10,7 +10,12 @@ machines (``agent.turn`` depends on it).
 
 from __future__ import annotations
 
-from llm.prompting import SYSTEM_PROMPTS, build_chat_prompt, system_prompt_for
+from llm.prompting import (
+    SYSTEM_PROMPTS,
+    SYSTEM_VARIANTS,
+    build_chat_prompt,
+    system_prompt_for,
+)
 
 __all__ = [
     "LoadedLLM",
@@ -20,6 +25,7 @@ __all__ = [
     "SYSTEM_PROMPTS",
     "build_chat_prompt",
     "system_prompt_for",
+    "SYSTEM_VARIANTS",
 ]
 
 _LAZY = {

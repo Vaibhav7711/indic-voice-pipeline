@@ -283,6 +283,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--presence-penalty", type=float, default=0.0)
     parser.add_argument("--seed", type=int, default=None,
                         help="required for a sampled run to be reproducible")
+    parser.add_argument("--system-variant", default="default",
+                        help="system prompt variant: default, or grounded, "
+                             "which adds an instruction to admit ignorance "
+                             "instead of inventing. Sampling was measured and "
+                             "refuted; this is the untested lever that remains, "
+                             "and declined_rate is what it targets")
     parser.add_argument("--out", default="results/answer_quality/scores.json")
     parser.add_argument("--note", default="")
     args = parser.parse_args(argv)
@@ -308,7 +314,9 @@ def main(argv: list[str] | None = None) -> int:
     )
     print(f"engine: {info}", flush=True)
 
-    system = system_prompt_for("hi")
+    system = system_prompt_for("hi", args.system_variant)
+    print(f"system prompt variant: {args.system_variant} "
+          f"({len(system)} chars)", flush=True)
     scores: list[Score] = []
     for index, case in enumerate(CASES, start=1):
         prompt = build_chat_prompt(tokenizer, system, case.prompt)
@@ -328,6 +336,8 @@ def main(argv: list[str] | None = None) -> int:
     summary = summarise(scores)
     report = {
         "note": args.note, "engine": info, "max_new_tokens": args.max_new_tokens,
+        "system_variant": args.system_variant,
+        "system_prompt": system,
         "sampling": {"temperature": args.temperature, "top_p": args.top_p,
                      "top_k": args.top_k,
                      "presence_penalty": args.presence_penalty,
