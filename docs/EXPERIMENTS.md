@@ -536,6 +536,93 @@ until a speakable unit, not TTS synthesis. The live records do not record the
 selected LLM, TTS backend, GPU, or notebook commit, so this is a real
 distribution but not a configuration-comparison result.
 
+## Served-engine sweep, first measured run (2026-09-26)
+
+Colab T4, Qwen3-1.7B, `full-inference-engine` patched for the UTF-8 streaming
+defect, `llm.engines.server_app` with a 512 × 16 pool. Evidence:
+`results/engine_parity/parity.json`, `results/latency_ab/{turns.jsonl,summary.json}`.
+
+### The UTF-8 corruption is fixed
+
+`corrupted_prompts: 0`, `served_replacement_chars: 0` across 5 parity prompts,
+and **0 U+FFFD across all 32 sweep turns**. Before the patch, 4 of 4 Hindi
+prompts were corrupted. `docs/ENGINE_BUG_UTF8_STREAMING.md` holds the report;
+the patch is applied by `scripts/patch_engine_utf8.py` and belongs upstream.
+
+### Latency: the engine is faster, by less than this run says
+
+| arm | p50 transcript → first audio | p90 | first token p50 | to first unit p50 | mean tokens |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `baseline` explicit 1.7B | 2411.7 ms | 3360.2 | 772.4 | 1670.0 | 52.0 |
+| `served` engine 1.7B | **848.6 ms** | 924.8 | **42.0** | 547.2 | 50.6 |
+| `history200` | 1849.2 ms | 3114.9 | 511.7 | 1341.1 | 41.1 |
+| `units30` | 2394.3 ms | 2540.1 | 780.0 | 1326.4 | 52.0 |
+
+Eight interleaved rounds per arm, 86.5 s total, MMS TTS, no errors. Generated
+token counts are comparable across arms, so the gap is not a shorter-answer
+artefact.
+
+**The 2.84× is confounded and overstates the engine.** The explicit arm loaded
+**bfloat16** and the server served **float16**, and this is a T4: bf16 has no
+tensor cores before Ampere, so the baseline carried an emulation penalty on
+top of whatever the engine saves. `llm.loader.pick_dtype` caused it — its
+docstring says exactly this ("T4 (sm_75) has no bf16 tensor cores … a slow
+path") while the code gated on `torch.cuda.is_bf16_supported()`, which counts
+emulated support and answers True on a T4. Now gated on compute capability
+≥ 8.0, and `scripts/latency_ab.py --dtype` sets the explicit arm explicitly and
+records it.
+
+**Not decided.** The pre-registered rule requires the parity gate to pass
+first, and it did not. The ratio is also unusable until the arms share a dtype.
+Both are re-runs, not re-interpretations.
+
+The prefill figure is the one to watch: 772.4 → 42.0 ms is 18×, far more than
+a dtype penalty plausibly explains on its own, so a real prefill win is likely
+to survive the re-run. That is a prediction, not a result.
+
+### Parity: 3/5, with matched fp16
+
+| prompt | verdict |
+| --- | --- |
+| नमस्ते, आज मौसम कैसा है? | identical (17 chars) |
+| भारत की राजधानी क्या है? | identical (29 chars) |
+| मुझे एक छोटी कहानी सुनाओ। | agreed on 26 chars, then the served side loops |
+| What is the capital of India? | diverged at char 13 |
+| थोड़ा धीरे बोलो please… | diverged at char **2** |
+
+Mean shared prefix 17.4 characters, 62.6% of the reference response. Dtypes
+matched (both `torch.float16`), so this is not the dtype confound — it is
+genuine numerical divergence between two greedy decoders.
+
+Divergence at char 2 means the **first token** already differed, so prefill
+differs. That is expected to some degree: the engine fuses chunked prefill with
+decode, and a different accumulation order in fp16 flips an argmax wherever the
+top two candidates are close. What is not yet known is whether these were close
+calls. **The deciding measurement is the reference's top-2 logit margin at each
+divergence point** — a small margin means numerical noise and the engine is
+sound; a large one means it is computing something else. Not built, needs a GPU.
+
+### Two findings the gate surfaced incidentally
+
+**Serving dropped the repetition guard.** `LLMRunner` stops degenerate greedy
+output with an n-gram check and reports `stopped_on_repetition`. Over HTTP the
+server owns the decode, so nothing downstream could stop it: the served arm
+emitted `एक बर्फ के` thirteen times and ran to its 128-token cap where the
+explicit arm answered the same prompt coherently. `HttpLLMEngine` now carries a
+character-level guard (48-character window, period searched, three repeats
+required) which closes the stream — so the engine cancels the request and the
+loop is neither spoken nor paid for. It is weaker than a token-level guard and
+no substitute for one in the engine.
+
+**Qwen3-1.7B's Hindi answers are poor, and the bake-off never measured that.**
+"What is the capital of India?" produced *चीनी राजधानी है।* ("it is the Chinese
+capital") from the reference and *चीनी राजधानी बेंगलुरु है।* from the server;
+"नमस्ते, आज मौसम कैसा है?" produced *आज मौसम बराबर है।* ("the weather is equal
+today"). The bake-off scored `devanagari_ratio` and `think_leaks`, so **1.000
+Devanagari never meant correct answers** — it meant the script was right. No
+harness in this project measures answer correctness, and that gap now has
+evidence rather than being hypothetical.
+
 ## Pre-registered: the serving-engine and turn-latency sweep (registered 2026-09-25)
 
 Registered **before** the runs, so the rules cannot be chosen after seeing the

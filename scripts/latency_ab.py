@@ -189,6 +189,14 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--llm-api-key", default=None)
     parser.add_argument("--tts", default="edge", choices=["edge", "mms"])
     parser.add_argument("--device", default=None)
+    parser.add_argument("--dtype", default=None,
+                        choices=["float16", "bfloat16", "float32"],
+                        help="the explicit arm's dtype. Set it to whatever the "
+                             "server serves, or the arms differ in numerics as "
+                             "well as engine -- a measured sweep ran bf16 "
+                             "against an fp16 server on a T4, where bf16 has no "
+                             "tensor cores, and the explicit arm carried a "
+                             "prefill penalty that read as the engine being fast")
     parser.add_argument("--history-tokens", type=int, default=800)
     parser.add_argument("--history-turns", type=int, default=6)
     parser.add_argument("--unit-chars", type=int, default=60)
@@ -221,8 +229,13 @@ def main(argv: list[str] | None = None) -> int:
     engine_info: dict = {}
     for engine in engines:
         print(f"loading llm ({engine})…", flush=True)
+        dtype = None
+        if args.dtype:
+            import torch
+
+            dtype = getattr(torch, args.dtype)
         generator, tokenizer, info = build_llm(
-            engine, model=args.llm_model, device=args.device,
+            engine, model=args.llm_model, device=args.device, dtype=dtype,
             base_url=args.llm_base_url, api_key=args.llm_api_key,
         )
         generators[engine] = (generator, tokenizer)
@@ -288,7 +301,10 @@ def main(argv: list[str] | None = None) -> int:
         "elapsed_s": round(time.time() - started, 1),
         "prompts": prompts,
         "base": base,
+        # Recorded per engine, because a dtype difference between arms makes
+        # the comparison one of numerics as well as engines.
         "engines": engine_info,
+        "dtype_requested": args.dtype,
         "tts": args.tts,
         "arms": {name: {"overrides": overrides, **summarize(records[name])}
                  for name, overrides in arms},

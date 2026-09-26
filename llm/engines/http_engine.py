@@ -70,6 +70,11 @@ __all__ = ["HttpEngineMetrics", "HttpEngineResult", "HttpLLMEngine"]
 
 DEFAULT_TIMEOUT = 120.0
 
+#: U+FFFD, written as a code point so it is legible in source. See the
+#: module docstring: its presence in streamed text means the server split a
+#: multi-byte character across chunks.
+REPLACEMENT_CHAR = chr(0xFFFD)
+
 
 @dataclass
 class HttpEngineMetrics:
@@ -158,6 +163,7 @@ class HttpLLMEngine:
         timeout: float = DEFAULT_TIMEOUT,
         tokenizer: Any = None,
         stop: list[str] | None = None,
+        loop_guard_chars: int = 48,
         extra_body: dict | None = None,
         transport: Callable[[str, dict, dict], Iterator[str]] | None = None,
     ):
@@ -177,6 +183,12 @@ class HttpLLMEngine:
         self.timeout = timeout
         self.tokenizer = tokenizer
         self.stop = list(stop or [])
+        #: Tail length in characters for the repetition guard; 0 disables it.
+        #: 48 covers loop periods up to 16, which includes the 11-character
+        #: period measured in a served run, and is short enough that ordinary
+        #: prose does not trip it -- the measured first spoken unit was 41
+        #: characters.
+        self.loop_guard_chars = loop_guard_chars
         self.extra_body = dict(extra_body or {})
         # The timeout is bound here rather than added to the transport
         # signature: a caller injecting a transport for a test should not have
@@ -229,6 +241,42 @@ class HttpLLMEngine:
 
     # -- the contract -----------------------------------------------------
 
+    @staticmethod
+    def _looping(text: str, size: int, *, repeats: int = 3,
+                 min_period: int = 4) -> bool:
+        """True when the tail is one block repeated `repeats` times over.
+
+        `LLMRunner` guards against degenerate greedy output with an n-gram
+        check on token ids and reports `stopped_on_repetition`. Serving over
+        HTTP dropped that guard silently: the server owns the decode, so
+        nothing downstream could stop it. A measured run caught the cost -- the
+        served arm produced `एक बर्फ के` thirteen times and ran to its
+        128-token cap while the explicit arm answered the same prompt
+        coherently.
+
+        The period is searched rather than assumed. Comparing two fixed halves
+        of the window only fires when the window happens to be a multiple of
+        the loop's period, and the observed loop has a period of 11 characters,
+        which a 24-character window misses entirely.
+
+        `repeats=3` and `min_period=4` are deliberately conservative: two
+        repeats of a short phrase happens in ordinary prose, and cutting a
+        legitimate answer mid-sentence is worse than speaking a loop. The check
+        is on characters, because that is all this side receives, so it is
+        weaker than a token-level guard and no substitute for one in the
+        engine.
+        """
+        if size <= 0 or repeats < 2:
+            return False
+        tail = text[-size:]
+        if len(tail) < size:
+            return False
+        for period in range(min_period, size // repeats + 1):
+            block = tail[-period:]
+            if tail[-period * repeats:] == block * repeats:
+                return True
+        return False
+
     def stream(
         self,
         prompt: str,
@@ -247,6 +295,9 @@ class HttpLLMEngine:
         last = start
         stopped = False
         completed = False
+        #: Everything yielded so far, for the repetition guard. Text only, so
+        #: it stays small next to the audio the turn is already buffering.
+        seen: list[str] = []
         # Held so it can be closed explicitly: closing the response is what the
         # server sees as a disconnect, and this engine cancels the request on
         # disconnect. Leaving it to garbage collection would keep generating
@@ -274,7 +325,8 @@ class HttpLLMEngine:
                     continue
                 now = perf_counter_ns()
                 metrics.chunks += 1
-                metrics.replacement_chars += piece.count("�")
+                metrics.replacement_chars += piece.count(REPLACEMENT_CHAR)
+                seen.append(piece)
                 if metrics.prefill_ms is None:
                     metrics.prefill_ms = (now - start) / 1_000_000
                 else:
@@ -282,6 +334,13 @@ class HttpLLMEngine:
                 last = now
                 yield piece
                 if should_stop is not None and should_stop():
+                    stopped = True
+                    break
+                if self._looping("".join(seen), self.loop_guard_chars):
+                    # Abandoning the stream closes the socket, which this
+                    # engine reads as a disconnect and cancels the request, so
+                    # the loop stops costing GPU time as well as going unspoken.
+                    metrics.stopped_on_repetition = True
                     stopped = True
                     break
             else:

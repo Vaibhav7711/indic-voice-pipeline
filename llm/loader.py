@@ -39,7 +39,14 @@ def pick_dtype(requested: torch.dtype | None = None,
         return torch.float32
     if requested is not None and requested != torch.bfloat16:
         return requested
-    return torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16
+    # Compute capability, not `torch.cuda.is_bf16_supported()`. That call
+    # counts emulated support and answers True on a T4, so this function used
+    # to hand back exactly the slow path its own docstring warns about -- a
+    # measured sweep loaded bf16 on a T4 and its explicit arm carried a prefill
+    # penalty that was read as the engine being fast. bf16 tensor cores arrive
+    # with Ampere (sm_80).
+    major, _minor = torch.cuda.get_device_capability(device)
+    return torch.bfloat16 if major >= 8 else torch.float16
 
 
 def load_llm(
