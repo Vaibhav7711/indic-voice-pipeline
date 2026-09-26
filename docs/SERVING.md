@@ -50,20 +50,31 @@ A/Bs and a token-identity gate against stock Transformers — the same standard
 this repo holds itself to. Its recorded figures on a T4 with ~656-token chat
 prompts are TTFT p50 ~0.3–0.4 s and ITL p50 19.8 ms, for Qwen3-0.6B.
 
-### The model: Qwen3-4B
+### The model: Qwen3-1.7B
 
-The default is now **Qwen3-4B**, served by the engine. Its geometry clears the
-paged kernels' constraints — 36 layers, 32 query heads, 8 KV heads, head
-dimension 128, so under the 128 limit, a multiple of 8, GQA divisible, no
-sliding window, not MLA — and it loads through `create_app` on a single GPU.
+The default is **Qwen3-1.7B**, served by the engine: 28 layers, 16 query heads,
+8 KV heads, head dimension 128, which clears the paged kernels' constraints
+(under the 128 limit, a multiple of 8, GQA divisible, no sliding window, not
+MLA).
 
-Three facts to hold together when reading any result from it:
+**Why not 4B.** The parity gate decodes the same weights **twice on one card** —
+the server holds a copy and the reference runner needs one in its own process.
+Two 4B copies is ~15 GiB of weights on a 15 GiB T4, and a measured Colab run
+died at 87% of the second load with no explanation. This cost was missing from
+the VRAM budget below until that run found it. 1.7B fits twice over with room
+for Whisper.
 
-| | |
-| --- | --- |
-| **VRAM** | ~7.5 GiB weights + 144 KiB per cached KV token. `llm/engines/server_app.py` defaults to a 512 × 16 = 8192-token pool (1.125 GiB) rather than the engine's 1024 × 16 (2.25 GiB), because a voice agent is one stream with an ≤800-token prompt. Fits a 15 GB T4 beside Whisper; **does not fit an 8 GB card** in fp16 — use `--llm-model Qwen/Qwen3-0.6B` or a quantized path there. |
-| **Latency, measured** | The T4 bake-off measured first-sentence p50 at **1744 ms for 0.6B and 3553 ms for 4B** on the explicit runner. Moving to 4B therefore roughly doubles the metric this project is trying to reduce, *unless* the engine recovers more than 2×. That is the bet, and it is what the pre-registered sweep tests. |
-| **Speculative decoding is not available here** | The mechanism that could most plausibly pay for 4B's decode cost — a 0.6B draft — needs two GPUs: `create_app` raises when target and draft share a device, and the profile for it is `create_kaggle_t4x2_speculative_app`. The engine's own record also notes the 0.6B drafter did not beat target-only on the measured T4. So on one card, 4B's win has to come from CUDA-graphed decode and chunked prefill alone. |
+4B also loses on the evidence already collected. The T4 bake-off measured
+Devanagari ratio **1.000 for both 0.6B and 1.7B against 0.988 for 4B**, and
+first-sentence p50 at 1744 / 2534 / 3553 ms. So 1.7B keeps the script purity
+4B gives up, at 1.45× the 0.6B latency rather than 2×.
+
+**Speculative decoding is not available on one card** either way — the
+mechanism that could most plausibly pay for a larger model's decode cost needs
+two GPUs, since `create_app` raises when target and draft share a device, and
+the engine's own record notes the 0.6B drafter did not beat target-only on the
+measured T4. A larger model's win here has to come from CUDA-graphed decode and
+chunked prefill alone.
 
 ### Known blocker: the engine corrupts streamed Indic text
 
@@ -181,11 +192,19 @@ allocator fragmenting it underneath.
 
 | on a 15 GB T4 | GiB |
 | --- | ---: |
-| Qwen3-4B fp16 weights | ~7.5 |
-| KV pool, 512 × 16 = 8192 tokens at 144 KiB | 1.125 |
+| Qwen3-1.7B fp16 weights, server process | ~3.8 |
+| KV pool, 512 × 16 = 8192 tokens at 112 KiB | 0.875 |
 | Whisper-medium fp16, other process | 1.5 |
 | two CUDA contexts | ~0.6 |
-| **subtotal, before graphs and activations** | **~10.7** |
+| **subtotal, before graphs and activations** | **~6.8** |
+| *plus, while the parity gate or the sweep runs:* a **second** copy of the LLM weights | ~3.8 |
+
+That last row is the one this budget originally omitted, and it is what killed
+a 4B run: `scripts/engine_parity.py` and the explicit arm of
+`scripts/latency_ab.py` each load the weights again in their own process,
+because a reference decode has to happen locally. The gate now runs a VRAM
+preflight and refuses with the arithmetic rather than dying partway through the
+load.
 
 Graph capture costs memory per bucket, so the default buckets are `(1, 2)`
 with `max_active=2` — one in-flight request, plus one so a barge-in's

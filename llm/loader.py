@@ -43,7 +43,7 @@ def pick_dtype(requested: torch.dtype | None = None,
 
 
 def load_llm(
-    model_name: str = "Qwen/Qwen3-4B",
+    model_name: str = "Qwen/Qwen3-1.7B",
     *,
     dtype: torch.dtype | None = None,
     device: str | torch.device | None = None,

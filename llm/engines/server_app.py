@@ -17,13 +17,14 @@ architecture*, and a zero-argument factory cannot drift from what was measured.
 That is the right design for those profiles and the wrong one for a model they
 do not cover.
 
-Qwen3-4B needs a pool sized for it. Its KV is 36 layers x 2 x 8 KV heads x 128
-head dim x 2 bytes = **144 KiB per token**, against 0.6B's much cheaper cache,
-so the engine's default 1024 x 16 = 16384-token pool costs 2.25 GiB for 4B
-where it is loose change for 0.6B. There is no argument to `uvicorn --factory`
-to say so, hence this module: it reads the configuration from the environment,
-so `scripts/serve_llm.py` can set it and the process still starts with a
-zero-argument factory.
+A bigger checkpoint needs a pool sized for it. KV cost per cached token is
+`2 x layers x kv_heads x head_dim x dtype_bytes`, which is 112 KiB for
+Qwen3-1.7B and 144 KiB for Qwen3-4B, so the engine's default 1024 x 16 =
+16384-token pool costs 1.75 GiB and 2.25 GiB respectively -- loose change for
+0.6B, and not for either of these on a card shared with Whisper. There is no
+argument to `uvicorn --factory` to say so, hence this module: it reads the
+configuration from the environment, so `scripts/serve_llm.py` can set it and
+the process still starts with a zero-argument factory.
 
     LLM_SERVER_MODEL=Qwen/Qwen3-4B LLM_SERVER_NUM_BLOCKS=512 \
         uvicorn llm.engines.server_app:create --factory
@@ -61,10 +62,10 @@ MODEL_WEIGHT_GIB: dict[str, float] = {
 }
 
 DEFAULTS = {
-    "model": "Qwen/Qwen3-4B",
+    "model": "Qwen/Qwen3-1.7B",
     # A voice agent is one stream. 512 x 16 = 8192 KV tokens is 10x a
-    # 800-token dialogue prompt and costs 1.125 GiB at 4B's 144 KiB/token,
-    # against 2.25 GiB for the engine's 1024-block default.
+    # 800-token dialogue prompt, and costs 0.875 GiB at Qwen3-1.7B's 112 KiB
+    # per token against 1.75 GiB for the engine's 1024-block default.
     "num_blocks": 512,
     "block_size": 16,
     # One in-flight request, plus one so a barge-in's replacement turn does

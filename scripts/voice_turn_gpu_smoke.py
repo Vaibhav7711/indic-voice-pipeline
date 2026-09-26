@@ -16,7 +16,7 @@ def main() -> int:
     parser.add_argument("--audio", required=True)
     parser.add_argument("--adapter", required=True)
     parser.add_argument("--whisper-model", default="openai/whisper-medium")
-    parser.add_argument("--llm-model", default="Qwen/Qwen3-4B")
+    parser.add_argument("--llm-model", default="Qwen/Qwen3-1.7B")
     parser.add_argument("--output", default="results/streaming/voice_turn_gpu_smoke.json")
     args = parser.parse_args()
 

@@ -20,7 +20,7 @@ def main():
     parser.add_argument("--language", default="hi")
     parser.add_argument("--whisper-model", default="openai/whisper-medium")
     parser.add_argument("--adapter", default=None, help="PEFT LoRA adapter directory")
-    parser.add_argument("--llm-model", default="Qwen/Qwen3-4B")
+    parser.add_argument("--llm-model", default="Qwen/Qwen3-1.7B")
     parser.add_argument("--llm-max-tokens", type=int, default=64)
     parser.add_argument("--warmup-runs", type=int, default=1)
     parser.add_argument("--runs", type=int, default=3)

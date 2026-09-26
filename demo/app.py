@@ -18,7 +18,7 @@ adapter without editing code:
 
     WHISPER_MODEL   default openai/whisper-large-v3-turbo
     WHISPER_ADAPTER_PATH   a local directory or a Hub id (the shipped v2 adapter)
-    LLM_MODEL       default Qwen/Qwen3-4B
+    LLM_MODEL       default Qwen/Qwen3-1.7B
     TTS_BACKEND     edge (network, default) | mms (local)
     DEVICE          cuda | cpu (default: cuda when available)
 
@@ -41,7 +41,7 @@ import numpy as np
 
 LANGUAGES = ["hi", "en", "te"]
 DEFAULT_WHISPER = "openai/whisper-large-v3-turbo"
-DEFAULT_LLM = "Qwen/Qwen3-4B"
+DEFAULT_LLM = "Qwen/Qwen3-1.7B"
 
 
 # --------------------------------------------------------------------------

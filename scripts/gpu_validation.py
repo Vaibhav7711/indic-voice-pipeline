@@ -640,7 +640,7 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--adapter", default="Hugme6969/whisper-medium-hindi-lora")
     parser.add_argument("--whisper-model", default="openai/whisper-medium")
-    parser.add_argument("--llm-model", default="Qwen/Qwen3-4B")
+    parser.add_argument("--llm-model", default="Qwen/Qwen3-1.7B")
     parser.add_argument("--out-dir", default="results/gpu_validation")
     parser.add_argument("--hi-indices", default="7,42,123,256,311",
                         help="FLEURS hi_in test rows to use as clips")

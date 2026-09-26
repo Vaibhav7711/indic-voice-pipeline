@@ -133,6 +133,57 @@ def compare(reference: str, served: str, *, prefix_chars: int) -> dict:
     }
 
 
+def vram_preflight(model: str, *, free_gib: float | None) -> dict:
+    """Will the reference copy fit beside the one the server already holds?
+
+    This gate loads the weights a *second* time: the server has its own copy,
+    and the reference runner needs one in this process to decode against. On a
+    single card that doubles the weight cost, which the serving VRAM budget
+    does not account for -- it counts the server's copy and Whisper.
+
+    Checked before the load rather than discovered at 87% of it, because the
+    failure mode is a killed process with no explanation, and the remedy
+    (a smaller checkpoint, or generating the reference in a separate run) is
+    not guessable from that.
+
+    `free_gib=None` means the free VRAM could not be read, so this reports
+    `unknown` rather than inventing a verdict.
+    """
+    # Imported here, not at module scope: every heavy import in this file is
+    # lazy so `--help` works in a checkout with no editable install.
+    from llm.engines.server_app import MODEL_WEIGHT_GIB
+
+    weights = MODEL_WEIGHT_GIB.get(model)
+    needed = None if weights is None else round(weights + 0.6, 2)
+    if free_gib is None or needed is None:
+        fits = None
+    else:
+        fits = free_gib >= needed
+    return {
+        "model": model,
+        "reference_copy_gib": weights,
+        # Weights plus room for activations and this process's CUDA context.
+        "needed_gib": needed,
+        "free_gib": None if free_gib is None else round(free_gib, 2),
+        "fits": fits,
+    }
+
+
+def free_vram_gib() -> float | None:
+    """Free VRAM on the default device, or `None` off-GPU or on error."""
+    try:
+        import torch
+    except ImportError:
+        return None
+    if not torch.cuda.is_available():
+        return None
+    try:
+        free_bytes, _total = torch.cuda.mem_get_info()
+    except Exception:  # noqa: BLE001 - a missing figure must not fail the gate
+        return None
+    return free_bytes / 1024**3
+
+
 def summarize(results: list[dict]) -> dict:
     """Aggregate. Rates are `None` on an empty sample rather than 1.0 or 0.0."""
     total = len(results)
@@ -171,7 +222,7 @@ def summarize(results: list[dict]) -> dict:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    parser.add_argument("--llm-model", default="Qwen/Qwen3-4B")
+    parser.add_argument("--llm-model", default="Qwen/Qwen3-1.7B")
     parser.add_argument("--llm-base-url", default="http://127.0.0.1:8000/v1")
     parser.add_argument("--llm-api-key", default=None)
     parser.add_argument("--device", default=None)
@@ -190,6 +241,9 @@ def main(argv: list[str] | None = None) -> int:
                              "reasons that have nothing to do with the engine. "
                              "Defaults to float16 because that is what "
                              "llm/engines/server_app.py serves")
+    parser.add_argument("--skip-vram-check", action="store_true",
+                        help="load the reference copy even when the preflight "
+                             "says it will not fit beside the server's copy")
     parser.add_argument("--prompt", action="append", default=[], dest="prompts")
     parser.add_argument("--out", default="results/engine_parity/parity.json")
     parser.add_argument("--note", default="")
@@ -199,6 +253,25 @@ def main(argv: list[str] | None = None) -> int:
 
     from llm.engines import build_llm
     from llm.prompting import build_chat_prompt, system_prompt_for
+
+    # The server already holds one copy of these weights; this process is about
+    # to load a second. Say whether that fits before spending two minutes
+    # finding out.
+    preflight = vram_preflight(args.llm_model, free_gib=free_vram_gib())
+    print(f"vram preflight: {preflight}", flush=True)
+    if preflight["fits"] is False:
+        print(
+            f"\nerror: loading a reference copy of {args.llm_model} needs about "
+            f"{preflight['needed_gib']} GiB and only {preflight['free_gib']} GiB "
+            f"is free.\nThis gate decodes the same weights twice on one card -- "
+            f"the server has a copy and\nso must this process. Either serve a "
+            f"smaller checkpoint (Qwen/Qwen3-1.7B fits a\n15 GiB T4 twice over, "
+            f"Qwen3-4B does not), or stop the server, run this gate\nagainst a "
+            f"server on another device, and restart it.\nOverride with "
+            f"--skip-vram-check if you believe the figure is wrong.",
+            file=sys.stderr)
+        if not args.skip_vram_check:
+            return 3
 
     print(f"loading the reference (explicit) runner in {args.dtype}…", flush=True)
     reference, tokenizer, reference_info = build_llm(
@@ -269,6 +342,7 @@ def main(argv: list[str] | None = None) -> int:
         "model": args.llm_model,
         "max_new_tokens": args.max_new_tokens,
         "prefix_chars": args.prefix_chars,
+        "vram_preflight": preflight,
         # Recorded because a mismatch here invalidates the comparison, and a
         # report that does not state both dtypes cannot be checked for it
         # later.

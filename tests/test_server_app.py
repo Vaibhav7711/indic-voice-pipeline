@@ -34,10 +34,15 @@ class TestKvArithmetic:
         total = pool_bytes("Qwen/Qwen3-4B", num_blocks=1024, block_size=16)
         assert round(total / 1024**3, 2) == 2.25
 
+    def test_qwen3_1_7b_costs_112_kib_per_token(self):
+        """28 layers x 2 x 8 KV heads x 128 head dim x 2 bytes."""
+        assert kv_bytes_per_token("Qwen/Qwen3-1.7B") == 114_688
+        assert kv_bytes_per_token("Qwen/Qwen3-1.7B") / 1024 == 112.0
+
     def test_the_default_pool_is_cheaper_and_still_ample(self):
-        total = pool_bytes("Qwen/Qwen3-4B", num_blocks=DEFAULTS["num_blocks"],
+        total = pool_bytes(DEFAULTS["model"], num_blocks=DEFAULTS["num_blocks"],
                            block_size=DEFAULTS["block_size"])
-        assert round(total / 1024**3, 3) == 1.125
+        assert round(total / 1024**3, 3) == 0.875
         # 8192 KV tokens against an <=800-token dialogue prompt plus its reply.
         assert DEFAULTS["num_blocks"] * DEFAULTS["block_size"] == 8192
 
@@ -61,12 +66,20 @@ class TestKvArithmetic:
 
 class TestDescribe:
     def test_it_reports_the_resident_estimate(self):
-        report = describe({"model_name": "Qwen/Qwen3-4B", "num_blocks": 512,
+        report = describe({"model_name": "Qwen/Qwen3-1.7B", "num_blocks": 512,
                            "block_size": 16})
         assert report["kv_tokens"] == 8192
-        assert report["kv_pool_gib"] == 1.125
-        assert report["weights_gib_fp16"] == 7.5
+        assert report["kv_pool_gib"] == 0.875
+        assert report["weights_gib_fp16"] == 3.8
+        assert report["resident_gib_estimate"] == 4.675
+
+    def test_the_4b_estimate_is_why_it_is_not_the_default(self):
+        """Two of these plus a pool exceeds a 15 GiB T4, and the parity gate
+        needs two."""
+        report = describe({"model_name": "Qwen/Qwen3-4B", "num_blocks": 512,
+                           "block_size": 16})
         assert report["resident_gib_estimate"] == 8.625
+        assert report["resident_gib_estimate"] * 2 > 15.0
 
     def test_an_unknown_model_reports_none_throughout(self):
         report = describe({"model_name": "x/y", "num_blocks": 512, "block_size": 16})
@@ -81,8 +94,10 @@ class TestDescribe:
 
 
 class TestConfigResolution:
-    def test_the_default_is_qwen3_4b(self):
-        assert resolve_config({})["model_name"] == "Qwen/Qwen3-4B"
+    def test_the_default_is_qwen3_1_7b(self):
+        """1.7B, not 4B: the parity gate loads a second copy of the weights on
+        the same card, and two 4B copies do not fit a 15 GiB T4."""
+        assert resolve_config({})["model_name"] == "Qwen/Qwen3-1.7B"
 
     def test_the_environment_overrides_every_knob(self):
         config = resolve_config({

@@ -181,7 +181,7 @@ def main(argv: list[str] | None = None) -> int:
                              + ", ".join(KNOBS))
     parser.add_argument("--rounds", type=int, default=6,
                         help="turns per arm; arms are interleaved within a round")
-    parser.add_argument("--llm-model", default="Qwen/Qwen3-4B")
+    parser.add_argument("--llm-model", default="Qwen/Qwen3-1.7B")
     parser.add_argument("--llm-engine", action="append", default=[],
                         dest="engines", choices=["explicit", "http"],
                         help="engines to load; repeat to compare them as arms")

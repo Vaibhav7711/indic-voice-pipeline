@@ -190,7 +190,7 @@ class NotebookAgent:
         *,
         whisper: str = "openai/whisper-large-v3-turbo",
         adapter: str | None = None,
-        llm: str = "Qwen/Qwen3-4B",
+        llm: str = "Qwen/Qwen3-1.7B",
         tts: str = "mms",
         language: str = "hi",
         device: str | None = None,

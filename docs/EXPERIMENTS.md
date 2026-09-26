@@ -549,7 +549,35 @@ those records omit their configuration — so the sweep's own baseline arm, not
 those 12 turns, is the comparison. The predictions below are stated in advance
 precisely so that being wrong is visible.
 
-**Model change: Qwen3-0.6B → Qwen3-4B (registered 2026-09-25).** The default
+**Superseded 2026-09-26: the model change is to Qwen3-1.7B, not 4B.** The 4B
+entry below stands as written — it was registered before the run and its
+prediction was not tested, so it is superseded rather than deleted. What
+refuted it was not latency but VRAM: `scripts/engine_parity.py` decodes the
+same weights a second time in its own process, since a reference decode has to
+happen locally, and two 7.5 GiB copies do not fit a 15 GiB T4. A Colab run died
+at 87% of the second load. That cost was absent from the VRAM arithmetic in the
+4B entry, which counted the server's copy and Whisper only.
+
+Qwen3-1.7B is the revised default, and it is better on the evidence already
+collected rather than merely smaller: the T4 bake-off measured Devanagari ratio
+**1.000 for 1.7B against 0.988 for 4B**, at first-sentence p50 2534 ms against
+3553 ms. So 1.7B keeps the script purity 4B gives up, at 1.45× the 0.6B latency
+instead of 2×.
+
+- *Decision rule, revised:* the sweep's baseline and served arms now use the
+  **same checkpoint**, so the comparison isolates the engine. Adopt the served
+  engine if parity passes and p50 transcript → first audio improves by ≥ 1.1×.
+  The 0.6B-versus-1.7B question is not re-opened here: the bake-off answered
+  it, and mixing a model change into an engine A/B would make neither
+  attributable.
+- *What this gives up:* the 4B quality question is now unmeasured rather than
+  measured-and-rejected. Recorded as such. Testing it needs either a second GPU
+  or a two-phase gate that generates the reference outputs before the server
+  starts; neither is built.
+- *Prediction:* unchanged for the engine — above 1.1×. The model change is not
+  predicted, because it is not being measured.
+
+**Model change: Qwen3-0.6B → Qwen3-4B (registered 2026-09-25, superseded).** The default
 LLM is now Qwen3-4B, served by the engine. The reasons and the counter-evidence
 are both recorded here, before the run, because they point in opposite
 directions.

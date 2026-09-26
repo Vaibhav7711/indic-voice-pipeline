@@ -65,7 +65,7 @@ def build_asr(
 def build_llm(
     engine: str = "explicit",
     *,
-    model: str = "Qwen/Qwen3-4B",
+    model: str = "Qwen/Qwen3-1.7B",
     device: str | None = None,
     dtype=None,
     quantization: str | None = None,
