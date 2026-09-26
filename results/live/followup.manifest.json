@@ -1,0 +1,19 @@
+{
+  "preset": "followup",
+  "sample_rate": 16000,
+  "lead_in": 0.5,
+  "utterances": [
+    {
+      "text": "भारत की राजधानी क्या है?",
+      "starts_at": 0.5,
+      "ends_at": 3.452,
+      "gap_after": 6.0
+    },
+    {
+      "text": "वहाँ की आबादी कितनी है?",
+      "starts_at": 9.452,
+      "ends_at": 12.308,
+      "gap_after": 4.0
+    }
+  ]
+}

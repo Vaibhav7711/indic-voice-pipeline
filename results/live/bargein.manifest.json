@@ -1,0 +1,19 @@
+{
+  "preset": "bargein",
+  "sample_rate": 16000,
+  "lead_in": 0.5,
+  "utterances": [
+    {
+      "text": "मुझे भारत के बारे में विस्तार से बताओ।",
+      "starts_at": 0.5,
+      "ends_at": 4.34,
+      "gap_after": 1.2
+    },
+    {
+      "text": "रुको, बस इतना ही।",
+      "starts_at": 5.54,
+      "ends_at": 8.396,
+      "gap_after": 4.0
+    }
+  ]
+}

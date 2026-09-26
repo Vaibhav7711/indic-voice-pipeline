@@ -2,7 +2,7 @@
   "note": "colab t4; baseline=explicit 1.7B, served=engine 1.7B",
   "primary_metric": "transcript_to_first_audio_ms",
   "rounds": 8,
-  "elapsed_s": 86.5,
+  "elapsed_s": 67.1,
   "prompts": [
     "नमस्ते, आज मौसम कैसा है?",
     "मुझे एक छोटी कहानी सुनाओ।",
@@ -21,19 +21,29 @@
       "engine": "explicit",
       "model": "Qwen/Qwen3-1.7B",
       "device": "cuda",
-      "dtype": "torch.bfloat16",
+      "dtype": "torch.float16",
       "quantization": null,
       "static_cache": false,
-      "compile_decode": false
+      "compile_decode": false,
+      "temperature": 0.0,
+      "top_p": 1.0,
+      "top_k": 0,
+      "seed": null
     },
     "http": {
       "engine": "http",
       "model": "Qwen/Qwen3-1.7B",
       "endpoint": "http://127.0.0.1:8000/v1/completions",
       "chat": false,
-      "templated_by": "client"
+      "templated_by": "client",
+      "temperature": 0.0,
+      "top_p": 1.0,
+      "top_k": 0,
+      "presence_penalty": 0.0,
+      "seed": null
     }
   },
+  "dtype_requested": "float16",
   "tts": "mms",
   "arms": {
     "baseline": {
@@ -41,9 +51,9 @@
       "turns": 8,
       "transcript_to_first_audio_ms": {
         "n": 8,
-        "p50": 2411.7,
-        "p90": 3360.1580000000004,
-        "mean": 2550.104625
+        "p50": 1788.9579999999999,
+        "p90": 2831.835,
+        "mean": 1874.91725
       },
       "response_latency_ms": {
         "n": 0,
@@ -53,29 +63,29 @@
       },
       "final_transcript_to_first_llm_token_ms": {
         "n": 8,
-        "p50": 772.374,
-        "p90": 1022.978,
-        "mean": 718.319
+        "p50": 131.058,
+        "p90": 205.377,
+        "mean": 136.270625
       },
       "first_token_to_first_unit_ms": {
         "n": 8,
-        "p50": 1669.996,
-        "p90": 2725.179,
-        "mean": 1719.6325
+        "p50": 1604.871,
+        "p90": 2695.416,
+        "mean": 1647.542875
       },
       "tts_synthesis_ms": {
         "n": 8,
-        "p50": 101.257,
-        "p90": 156.706,
-        "mean": 112.153375
+        "p50": 90.268,
+        "p90": 97.124,
+        "mean": 91.103625
       },
       "total_turn_ms": {
         "n": 8,
-        "p50": 2461.059,
-        "p90": 6933.488,
-        "mean": 3482.97425
+        "p50": 1833.437,
+        "p90": 6175.215,
+        "mean": 2790.921
       },
-      "mean_generated_tokens": 52.0
+      "mean_generated_tokens": 51.875
     },
     "served": {
       "overrides": {
@@ -84,9 +94,9 @@
       "turns": 8,
       "transcript_to_first_audio_ms": {
         "n": 8,
-        "p50": 848.5930000000001,
-        "p90": 924.794,
-        "mean": 796.169875
+        "p50": 653.7479999999999,
+        "p90": 777.77,
+        "mean": 626.03175
       },
       "response_latency_ms": {
         "n": 0,
@@ -96,29 +106,29 @@
       },
       "final_transcript_to_first_llm_token_ms": {
         "n": 8,
-        "p50": 42.025,
-        "p90": 69.08,
-        "mean": 63.55325
+        "p50": 36.713,
+        "p90": 63.338,
+        "mean": 51.22125
       },
       "first_token_to_first_unit_ms": {
         "n": 8,
-        "p50": 547.17,
-        "p90": 667.915,
-        "mean": 540.491
+        "p50": 449.432,
+        "p90": 470.147,
+        "mean": 396.165125
       },
       "tts_synthesis_ms": {
         "n": 8,
-        "p50": 127.697,
-        "p90": 309.182,
-        "mean": 192.12575
+        "p50": 102.386,
+        "p90": 322.911,
+        "mean": 178.645
       },
       "total_turn_ms": {
         "n": 8,
-        "p50": 850.004,
-        "p90": 2766.782,
-        "mean": 1325.419875
+        "p50": 654.607,
+        "p90": 1078.742,
+        "mean": 700.6759999999999
       },
-      "mean_generated_tokens": 50.625
+      "mean_generated_tokens": 31.625
     },
     "history200": {
       "overrides": {
@@ -127,9 +137,9 @@
       "turns": 8,
       "transcript_to_first_audio_ms": {
         "n": 8,
-        "p50": 1849.214,
-        "p90": 3114.869,
-        "mean": 2129.408375
+        "p50": 1472.212,
+        "p90": 2295.25,
+        "mean": 1662.732375
       },
       "response_latency_ms": {
         "n": 0,
@@ -139,27 +149,27 @@
       },
       "final_transcript_to_first_llm_token_ms": {
         "n": 8,
-        "p50": 511.704,
-        "p90": 533.043,
-        "mean": 430.201375
+        "p50": 76.321,
+        "p90": 85.87,
+        "mean": 71.29675
       },
       "first_token_to_first_unit_ms": {
         "n": 8,
-        "p50": 1341.118,
-        "p90": 2341.01,
-        "mean": 1561.213125
+        "p50": 1340.042,
+        "p90": 2105.926,
+        "mean": 1483.4075
       },
       "tts_synthesis_ms": {
         "n": 8,
-        "p50": 101.867,
-        "p90": 124.661,
-        "mean": 137.994125
+        "p50": 82.913,
+        "p90": 103.165,
+        "mean": 108.028375
       },
       "total_turn_ms": {
         "n": 8,
-        "p50": 1896.258,
-        "p90": 3161.59,
-        "mean": 2616.86525
+        "p50": 1524.805,
+        "p90": 2339.778,
+        "mean": 2129.7185
       },
       "mean_generated_tokens": 41.125
     },
@@ -170,9 +180,9 @@
       "turns": 8,
       "transcript_to_first_audio_ms": {
         "n": 8,
-        "p50": 2394.334,
-        "p90": 2540.05,
-        "mean": 2108.8265
+        "p50": 1510.538,
+        "p90": 1661.122,
+        "mean": 1409.0365
       },
       "response_latency_ms": {
         "n": 0,
@@ -182,29 +192,29 @@
       },
       "final_transcript_to_first_llm_token_ms": {
         "n": 8,
-        "p50": 779.97,
-        "p90": 985.561,
-        "mean": 695.7505
+        "p50": 115.67,
+        "p90": 149.568,
+        "mean": 108.71925
       },
       "first_token_to_first_unit_ms": {
         "n": 8,
-        "p50": 1326.389,
-        "p90": 1515.408,
-        "mean": 1315.29825
+        "p50": 1296.697,
+        "p90": 1462.239,
+        "mean": 1212.956625
       },
       "tts_synthesis_ms": {
         "n": 8,
-        "p50": 91.944,
-        "p90": 128.348,
-        "mean": 97.77787500000001
+        "p50": 85.147,
+        "p90": 105.983,
+        "mean": 87.360625
       },
       "total_turn_ms": {
         "n": 8,
-        "p50": 2586.764,
-        "p90": 6625.973,
-        "mean": 3378.847
+        "p50": 1705.829,
+        "p90": 6692.21,
+        "mean": 2764.32575
       },
-      "mean_generated_tokens": 52.0
+      "mean_generated_tokens": 51.875
     }
   }
 }

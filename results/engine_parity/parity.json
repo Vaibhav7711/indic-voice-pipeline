@@ -7,7 +7,7 @@
     "model": "Qwen/Qwen3-1.7B",
     "reference_copy_gib": 3.8,
     "needed_gib": 4.4,
-    "free_gib": 9.59,
+    "free_gib": 9.02,
     "fits": true
   },
   "reference_dtype_requested": "float16",
@@ -18,33 +18,42 @@
     "dtype": "torch.float16",
     "quantization": null,
     "static_cache": false,
-    "compile_decode": false
+    "compile_decode": false,
+    "temperature": 0.0,
+    "top_p": 1.0,
+    "top_k": 0,
+    "seed": null
   },
   "served": {
     "engine": "http",
     "model": "Qwen/Qwen3-1.7B",
     "endpoint": "http://127.0.0.1:8000/v1/completions",
     "chat": false,
-    "templated_by": "client"
+    "templated_by": "client",
+    "temperature": 0.0,
+    "top_p": 1.0,
+    "top_k": 0,
+    "presence_penalty": 0.0,
+    "seed": null
   },
   "probe": {
     "endpoint": "http://127.0.0.1:8000/v1/completions",
     "model": "Qwen/Qwen3-1.7B",
     "reachable": true,
     "text": " दुन",
-    "first_chunk_ms": 2002.442994,
+    "first_chunk_ms": 288.699367,
     "reported_usage": true,
     "chunks": 4,
     "replacement_chars": 0
   },
   "summary": {
     "prompts": 5,
-    "agreed": 3,
-    "identical": 2,
-    "agreement_rate": 0.6,
-    "identity_rate": 0.4,
-    "mean_shared_prefix_chars": 17.4,
-    "mean_shared_fraction": 0.6263095238095239,
+    "agreed": 4,
+    "identical": 3,
+    "agreement_rate": 0.8,
+    "identity_rate": 0.6,
+    "mean_shared_prefix_chars": 21.6,
+    "mean_shared_fraction": 0.6638095238095238,
     "corrupted_prompts": 0,
     "served_replacement_chars": 0,
     "passed": false
@@ -52,6 +61,7 @@
   "results": [
     {
       "prompt": "नमस्ते, आज मौसम कैसा है?",
+      "system_language": "hi",
       "reference": "आज मौसम बराबर है।",
       "served": "आज मौसम बराबर है।",
       "comparison": {
@@ -65,10 +75,10 @@
         "divergence": null
       },
       "served_metrics": {
-        "prefill_ms": 63.088112,
-        "mean_decode_ms": 18.515371285714284,
-        "total_decode_ms": 259.215198,
-        "total_ms": 338.038171,
+        "prefill_ms": 62.885854,
+        "mean_decode_ms": 18.30778742857143,
+        "total_decode_ms": 256.309024,
+        "total_ms": 330.726456,
         "prompt_tokens": 109,
         "generated_tokens": 18,
         "stopped_by_caller": false,
@@ -84,6 +94,7 @@
     },
     {
       "prompt": "भारत की राजधानी क्या है?",
+      "system_language": "hi",
       "reference": "भारत की राजधानी नई दिल्ली है।",
       "served": "भारत की राजधानी नई दिल्ली है।",
       "comparison": {
@@ -97,10 +108,10 @@
         "divergence": null
       },
       "served_metrics": {
-        "prefill_ms": 35.98717,
-        "mean_decode_ms": 16.903033269230768,
-        "total_decode_ms": 439.478865,
-        "total_ms": 491.512876,
+        "prefill_ms": 37.013541,
+        "mean_decode_ms": 16.94593476923077,
+        "total_decode_ms": 440.594304,
+        "total_ms": 487.421353,
         "prompt_tokens": 107,
         "generated_tokens": 29,
         "stopped_by_caller": false,
@@ -116,8 +127,9 @@
     },
     {
       "prompt": "मुझे एक छोटी कहानी सुनाओ।",
+      "system_language": "hi",
       "reference": "एक छोटी कहानी: एक बर्फ के घंटे में एक बच्चा अपने पिता के साथ खेलता है। उसके दिमाग में बर्फ के घंटे रहते ह",
-      "served": "एक छोटी कहानी: एक बर्फ के बर्फ के बर्फ के बर्फ के बर्फ के बर्फ के बर्फ के बर्फ के बर्फ के बर्फ के बर्फ के बर",
+      "served": "एक छोटी कहानी: एक बर्फ के बर्फ के बर्फ के बर्फ क",
       "comparison": {
         "identical": false,
         "shared_prefix_chars": 26,
@@ -125,26 +137,26 @@
         "agreed": true,
         "corruption": null,
         "reference_chars": 105,
-        "served_chars": 108,
+        "served_chars": 48,
         "divergence": {
           "at": 26,
           "reference": "घंटे में एक बच्चा अपने पिता के साथ खेलता",
-          "served": "बर्फ के बर्फ के बर्फ के बर्फ के बर्फ के "
+          "served": "बर्फ के बर्फ के बर्फ क"
         }
       },
       "served_metrics": {
-        "prefill_ms": 35.358627,
-        "mean_decode_ms": 16.471599736842105,
-        "total_decode_ms": 1564.801975,
-        "total_ms": 1600.321119,
-        "prompt_tokens": 108,
-        "generated_tokens": 96,
-        "stopped_by_caller": false,
-        "stopped_on_repetition": false,
+        "prefill_ms": 34.989301,
+        "mean_decode_ms": 16.037382047619047,
+        "total_decode_ms": 673.570046,
+        "total_ms": 708.636636,
+        "prompt_tokens": null,
+        "generated_tokens": 43,
+        "stopped_by_caller": true,
+        "stopped_on_repetition": true,
         "replacement_chars": 0,
         "prefill_is_arrival_time": true,
         "decode_is_per_chunk": true,
-        "chunks": 96,
+        "chunks": 43,
         "error": null,
         "endpoint": "http://127.0.0.1:8000/v1/completions",
         "model": "Qwen/Qwen3-1.7B"
@@ -152,35 +164,32 @@
     },
     {
       "prompt": "What is the capital of India?",
-      "reference": "चीनी राजधानी है।",
-      "served": "चीनी राजधानी बेंगलुरु है।",
+      "system_language": "en",
+      "reference": "The capital of India is New Delhi.",
+      "served": "The capital of India is New Delhi.",
       "comparison": {
-        "identical": false,
-        "shared_prefix_chars": 13,
-        "required_prefix_chars": 16,
-        "agreed": false,
+        "identical": true,
+        "shared_prefix_chars": 34,
+        "required_prefix_chars": 24,
+        "agreed": true,
         "corruption": null,
-        "reference_chars": 16,
-        "served_chars": 25,
-        "divergence": {
-          "at": 13,
-          "reference": "है।",
-          "served": "बेंगलुरु है।"
-        }
+        "reference_chars": 34,
+        "served_chars": 34,
+        "divergence": null
       },
       "served_metrics": {
-        "prefill_ms": 35.592413,
-        "mean_decode_ms": 16.985597782608696,
-        "total_decode_ms": 390.668749,
-        "total_ms": 442.272935,
-        "prompt_tokens": 92,
-        "generated_tokens": 26,
+        "prefill_ms": 63.465251,
+        "mean_decode_ms": 15.858978714285714,
+        "total_decode_ms": 111.012851,
+        "total_ms": 190.577739,
+        "prompt_tokens": 42,
+        "generated_tokens": 9,
         "stopped_by_caller": false,
         "stopped_on_repetition": false,
         "replacement_chars": 0,
         "prefill_is_arrival_time": true,
         "decode_is_per_chunk": true,
-        "chunks": 24,
+        "chunks": 8,
         "error": null,
         "endpoint": "http://127.0.0.1:8000/v1/completions",
         "model": "Qwen/Qwen3-1.7B"
@@ -188,6 +197,7 @@
     },
     {
       "prompt": "थोड़ा धीरे बोलो please, मुझे समझ नहीं आया।",
+      "system_language": "hi",
       "reference": "चलिए तेज बोलकर बात करते हैं।",
       "served": "चलो तुम्हें बिना बारी बोलूंगा।",
       "comparison": {
@@ -205,10 +215,10 @@
         }
       },
       "served_metrics": {
-        "prefill_ms": 35.102972,
-        "mean_decode_ms": 16.95115655172414,
-        "total_decode_ms": 491.58354,
-        "total_ms": 542.691499,
+        "prefill_ms": 32.410466,
+        "mean_decode_ms": 16.689139862068966,
+        "total_decode_ms": 483.985056,
+        "total_ms": 532.465474,
         "prompt_tokens": 120,
         "generated_tokens": 32,
         "stopped_by_caller": false,

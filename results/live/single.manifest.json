@@ -1,0 +1,13 @@
+{
+  "preset": "single",
+  "sample_rate": 16000,
+  "lead_in": 0.5,
+  "utterances": [
+    {
+      "text": "नमस्ते, आप कैसे हैं?",
+      "starts_at": 0.5,
+      "ends_at": 3.548,
+      "gap_after": 4.0
+    }
+  ]
+}

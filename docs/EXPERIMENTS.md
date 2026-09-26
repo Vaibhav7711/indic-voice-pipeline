@@ -553,6 +553,146 @@ until a speakable unit, not TTS synthesis. The live records do not record the
 selected LLM, TTS backend, GPU, or notebook commit, so this is a real
 distribution but not a configuration-comparison result.
 
+## Live conversation, dtype-clean sweep, and the sampling arms (2026-09-26, run 2)
+
+Colab T4, Qwen3-1.7B, engine patched. Evidence: `results/live/{followup,bargein}.jsonl`
+with their manifests, `results/latency_ab/`, `results/answer_quality/{greedy,greedy+penalty,sampled,sampled+penalty}.json`,
+`results/engine_parity/parity.json`.
+
+### Barge-in works. First time it has been exercised at all.
+
+Second utterance scripted to start 1.2 s after the first ends
+(`bargein.manifest.json`: 0.50–4.34 s, then 5.54–8.40 s), replayed through
+`--sink paced`. Turn 1:
+
+| signal | value |
+| --- | --- |
+| `state` | `interrupted` |
+| `barge_in` | `true` |
+| `llm_stopped_by_barge_in` | `true` |
+| `playback.state` | `cancelled` after 3 chunks / 19 200 bytes |
+| recorded response | truncated mid-word: *…अपनी अपेक्षाकृत बड* |
+
+All three signals agree, playback was cancelled rather than drained, and the
+history holds what was spoken rather than the whole response. Turn 2 then
+completed normally. This is the property `docs/AGENT_BRIEF.md` filed under
+"requires a human"; what it actually required was a sink that occupies
+wall-clock time.
+
+### Follow-up turns: the plumbing works, the memory test is inconclusive
+
+Two turns, 6 s apart, both recorded. Turn 1 answered correctly
+(*भारत की राजधानी नई दिल्ली है।*). Turn 2 asked *वहाँ की आबादी कितनी है?* and
+answered *वहाँ की आबाधी 100 फीट है।* — a population given in feet.
+
+It did not ask "where?", which is weak evidence the antecedent survived, but
+the answer contains no reference to Delhi or India, so **this run does not
+establish that dialogue memory reached the prompt**. The model's answer is too
+poor to reveal it either way. Recorded as inconclusive rather than as a pass.
+ASR also returned *आबाधी* for *आबादी* and dropped *रुको* from the barge-in
+utterance.
+
+### The dtype confound was real and large
+
+| | bf16 baseline (run 1) | fp16 baseline (run 2) |
+| --- | ---: | ---: |
+| baseline p50 transcript→first audio | 2411.7 ms | **1789.0 ms** |
+| baseline first token | 772.4 ms | **131.1 ms** |
+| served p50 | 848.6 ms | **653.7 ms** |
+| served first token | 42.0 ms | **36.7 ms** |
+| ratio | 2.84× | **2.7365×** |
+
+Fixing `pick_dtype` cut the baseline's prefill by **5.9×**, so the engine's
+prefill advantage falls from 18× to 3.6×. The headline ratio barely moved,
+because both arms got faster. **2.7365× is the defensible figure**: same
+checkpoint, same dtype, interleaved arms.
+
+| arm | p50 | p90 | first token | to first unit | mean tokens |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| baseline (explicit) | 1789.0 | 2831.8 | 131.1 | 1604.9 | 51.9 |
+| **served (engine)** | **653.7** | **777.8** | **36.7** | **449.4** | 31.6 |
+| history200 | 1472.2 | 2295.2 | 76.3 | 1340.0 | 41.1 |
+| units30 | 1510.5 | 1661.1 | 115.7 | 1296.7 | 51.9 |
+
+*Caveat recorded:* the served arm generated 31.6 tokens against the baseline's
+51.9, so the two arms produced different amounts of text — consistent with
+parity being 4/5, not 5/5. The primary metric is time to *first* audio, which a
+shorter total response does not shorten, so the ratio stands; but the arms are
+not producing identical content and the token counts say so.
+
+**`history200` is now worth 317 ms, not the ~1.2 s predicted**, because the
+prefill it trims is 131 ms rather than 772 ms. Most of that prediction was the
+bf16 penalty. `units30` is worth 278 ms on the primary metric and 308 ms on
+time-to-first-unit.
+
+### Sampling versus greedy: prediction refuted, all four arms identical
+
+| arm | factual | obeyed | declined | loops | too long | Devanagari |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| greedy | 40% | 80% | 0% | 0 | 0 | 98.3% |
+| greedy+penalty | 40% | 80% | 0% | 0 | 0 | 98.3% |
+| sampled | 40% | 80% | 0% | 0 | 0 | 98.3% |
+| sampled+penalty | 40% | 80% | 0% | 0 | 0 | 98.3% |
+
+Sampling did apply — 9 of 18 answers differ between `greedy` and `sampled`, and
+both runs record their parameters. It changed the wording and **not one score**.
+
+**Two predictions refuted, both stated in advance:**
+
+1. *"`looping` goes to zero on both sampled arms and on greedy+penalty."* It was
+   already zero on greedy, across all 18 cases. The `एक बर्फ के` ×13 loop seen
+   earlier was **prompt-specific, not a general property of greedy decoding**.
+   The same story prompt here produced 105 clean characters. The hypothesis that
+   greedy caused that loop is not supported.
+2. *"`instruction_obeyed` improves most on sampled+penalty."* Nothing moved.
+
+**Decision, by the pre-registered rule: keep greedy.** No arm satisfies the
+rule's `devanagari_ratio_mean ≥ 0.99` proviso — including the incumbent — so the
+rule yields no adoption; and on the tie-break (equal scores, prefer the lower
+temperature) greedy also wins. The decision is the same either way, which is
+the only reason the failed proviso does not need adjudicating.
+
+*A measurement error found in the proviso, and what it did not change.* The
+threshold was set from a bake-off that measured different prompts. Here one
+**correct** answer (*पानी के रासायनिक सूत्र आमतौर पर H₂O होता है।*) contains
+Latin characters, so script purity was scored down for being right.
+`Case.allows_latin` now excludes such cases; that lifts the figure from 0.9826
+to 0.9851, still under 0.99. The remaining shortfall is genuine: the model emits
+mixed-script tokens such as *बेंगalore*, which a TTS front end will mispronounce.
+The fix changes no decision, and is recorded here rather than applied quietly.
+
+### The real problem is the model's knowledge, not the decoder
+
+Instruction-following is **80%** with zero over-long answers, so the model obeys
+the prompt. Factual accuracy is **4 of 10**, and the failures are visible:
+
+| asked | answered |
+| --- | --- |
+| capital of France | *लिस्टन* — Lisbon |
+| capital of Japan | *तोकियोसहा* — a garbled Tokyo |
+| where is the Taj Mahal | *बेंगalore* — wrong city, and mid-word script mixing |
+| two plus two | *दोही* |
+| India's national animal | *बिंदौर एवं देश के अधिकांश जिलों में…* |
+| which direction the sun rises | *सूरज आकाश में उगता है* — "in the sky" |
+
+And **0 of 3** unanswerable cases were declined. Asked the time with no clock it
+answered *3:45 बजे*; asked the weather with no weather data, *खुशी से बराबर है*.
+Inventing a plausible answer is worse than refusing, because it sounds like an
+answer.
+
+Decoding cannot fix any of this, and this run is the evidence. Two levers remain
+untested, in cost order: the system prompt never tells the model to admit
+ignorance, which is what `declined_rate` measures and is a one-line change; and
+a larger checkpoint, which is a VRAM question for the parity gate rather than
+for serving.
+
+### Parity: 4/5, up from 3/5, still failing
+
+`corrupted_prompts: 0`, `served_replacement_chars: 0`, both sides fp16. Agreement
+4/5, identical 3/5, mean shared prefix 66.4% (from 62.6%). The gate still does
+not pass, and the logit-margin measurement that would settle whether the
+remaining divergence is a near-tie is still unbuilt.
+
 ## Pre-registered: sampling versus greedy, and answer quality (registered 2026-09-26)
 
 Registered before the run. Harness: `benchmarks/answer_quality.py`, 18 cases

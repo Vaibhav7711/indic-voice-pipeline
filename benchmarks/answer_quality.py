@@ -86,6 +86,14 @@ class Case:
     note: str = ""
     max_sentences: int = 2
     max_chars: int = 160
+    #: True when a correct answer legitimately contains Latin characters, so
+    #: the Devanagari ratio must not be held against it. "H₂O" is the case
+    #: that found this: the measured run scored 98% script purity across all
+    #: four arms *because one correct answer contains Latin*, and the
+    #: pre-registered >= 0.99 proviso was therefore unsatisfiable by any arm
+    #: including the incumbent. A metric that penalises a right answer is
+    #: measuring the wrong thing.
+    allows_latin: bool = False
 
 
 #: Small, and every item checkable. A larger set is better; a larger set of
@@ -98,7 +106,8 @@ CASES: tuple[Case, ...] = (
     Case("दो और दो कितने होते हैं?", "factual", expected=("चार", "4")),
     Case("एक सप्ताह में कितने दिन होते हैं?", "factual", expected=("सात", "7")),
     Case("सूरज किस दिशा में उगता है?", "factual", expected=("पूर्व",)),
-    Case("पानी का रासायनिक सूत्र क्या है?", "factual", expected=("H2O", "एच2ओ", "H₂O")),
+    Case("पानी का रासायनिक सूत्र क्या है?", "factual",
+         expected=("H2O", "एच2ओ", "H₂O"), allows_latin=True),
     Case("भारत का राष्ट्रीय पशु कौन है?", "factual", expected=("बाघ", "शेर")),
     Case("हिमालय किस देश में है?", "factual", expected=("भारत", "नेपाल")),
     Case("ताजमहल कहाँ है?", "factual", expected=("आगरा",)),
@@ -235,8 +244,10 @@ def summarise(scores: list[Score]) -> dict:
     factual = [s.correct for s in scores if s.correct is not None]
     obeyed = [s.obeyed for s in scores if s.obeyed is not None]
     declines = [s.declined for s in scores if s.declined is not None]
+    # Cases whose correct answer contains Latin are excluded from the script
+    # ratio, not scored down by it. Their own ratio is still recorded per case.
     ratios = [s.devanagari_ratio for s in scores
-              if s.devanagari_ratio is not None]
+              if s.devanagari_ratio is not None and not s.case.allows_latin]
     return {
         "cases": len(scores),
         "factual_n": len(factual), "factual_accuracy": rate(factual),
@@ -246,6 +257,8 @@ def summarise(scores: list[Score]) -> dict:
         "too_long": sum(s.too_long for s in scores),
         "empty_or_scriptless": sum(1 for s in scores
                                    if s.devanagari_ratio is None),
+        "script_ratio_cases": len(ratios),
+        "latin_allowed_cases": sum(1 for s in scores if s.case.allows_latin),
         "devanagari_ratio_mean": statistics.fmean(ratios) if ratios else None,
         "mean_chars": statistics.fmean([s.chars for s in scores]) if scores else None,
     }
