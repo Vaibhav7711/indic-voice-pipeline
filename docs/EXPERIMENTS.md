@@ -553,6 +553,146 @@ until a speakable unit, not TTS synthesis. The live records do not record the
 selected LLM, TTS backend, GPU, or notebook commit, so this is a real
 distribution but not a configuration-comparison result.
 
+## Run 3: the grounded prompt and the parity margins (2026-09-28)
+
+Kaggle, Tesla T4 (sm_75), `--dtype float16` on every command; torch
+2.10.0+cu128, transformers 5.0.0 (`results/run3/manifest.json`). Commits:
+`edfe2e7` for the grounded arms and for the margin script as committed;
+`186a530` (the fix registered below, before this run) for the margin
+verdict. The exact kernel is `results/run3/kaggle_kernel.py`; every command's
+output is in `results/run3/logs/`. Evidence:
+`results/answer_quality/{grounded,greedy_run3}.json`,
+`results/engine_parity/{logit_margins,logit_margins_edfe2e7}.json`.
+
+### The grounded prompt: adopted under the registered rule
+
+| | `greedy.json` (run 2, control) | `default` (run 3, same session) | `grounded` (run 3) |
+| --- | --- | --- | --- |
+| factual_accuracy | 4/10 | 4/10 | **5/10** |
+| instruction_obeyed | 4/5 | 4/5 | 4/5 |
+| declined_rate | 0/3 | 0/3 | **2/3** |
+| looping / too_long | 0 / 0 | 0 / 0 | 0 / 0 |
+| empty_or_scriptless | 1 | 1 | 1 |
+| mean_chars | 40.9 | 40.9 | 39.8 |
+
+**The control held.** The same-session `default` run reproduced all 18 run-2
+answers byte for byte, so this T4 and these library versions give the answers
+run 2 did, and the drift clause registered below does not apply.
+
+**Rule:** `declined_rate` 2/3 meets "≥ 2 of 3"; `factual_accuracy` rose 10 pp
+(*दो और दो* → *चार होते हैं।*); `instruction_obeyed` unchanged. **Verdict: adopt
+`grounded` as the default.** The pipeline still calls the default variant;
+wiring it in is a separate change, not made here.
+
+**Read together:** no factual or instruction answer drew a refusal. The weather
+and bank-balance answers declined (*…जानकारी नहीं है।*); the time answer is
+*अभी समय नहीं बताया जा सकता।*.
+
+**Predictions:** declined 2/3 or 3/3 — held. Factual "moves by less than 10 pp"
+— refuted, narrowly: it moved exactly 10 pp, up. With ten cases the smallest
+possible move is 10 pp, so only no change could have met it. Instruction
+unchanged — held. As registered, the prompt cannot fix knowledge: France is
+now *बर्गेर*, the Taj Mahal is in England.
+
+**Surprises, recorded beside the verdict and not folded into it:**
+
+- *Hitting the token cap moved to the instruction answers.* In each arm 3 of
+  18 answers hit the 96-token cap (counted by re-tokenising them). In default
+  those were the national-animal, story and bank-balance answers. In grounded
+  the national-animal and bank answers got short, and three of the five
+  instruction answers hit the cap: the story again, plus two answers that were
+  short and complete before. *थोड़ा धीरे बोलो* (default: *चलिए थोड़ा धीरे बोलूंगा।*)
+  became a rambling non-answer, and the one-sentence yoga answer never
+  finished; both are cut mid-character (U+FFFD). Each stays under 160
+  characters with one sentence, so `instruction_obeyed` counts both obeyed.
+  A spoken answer cut mid-word is a cost this rule cannot see; whoever wires
+  `grounded` in should weigh it. The harness does not record whether an answer
+  hit the cap, and should.
+- *The harness undercounts in three places, the same way in every arm.* The
+  time answer is a refusal, but `REFUSALS` has *बता नहीं* and not *नहीं बताया*,
+  so by reading the grounded arm declined 3/3. The grounded *टोकियो* is a
+  correct spelling missing from `expected`, so by reading it was 6/10 factual.
+  *1, 2, 3.* fails the counting instruction in both arms because `expected` is
+  the word *तीन*. The scorer was not changed; changing it after seeing the
+  answers is what registration exists to prevent.
+
+### Parity margins: undecided
+
+The committed script, as registered below: the documented command failed to
+start (`logs/margins-documented-at-base.log`: `No module named 'scripts'`).
+Run as a module, it reported divergences at steps 3, 1, 2 and 3 on the four
+Hindi prompts — two of them byte-identical to the served text — and called
+all four `clear`. That is the prediction, exactly. Read literally, it would
+have declared the engine defective on divergences that do not exist. It is
+kept as `logit_margins_edfe2e7.json` to show that, not as evidence about the
+engine.
+
+The fixed script:
+
+| prompt | parity gate | regenerated = recorded reference | regenerated vs served | diverged at | margin / median | verdict |
+| --- | --- | --- | --- | --- | --- | --- |
+| *नमस्ते, आज मौसम कैसा है?* | identical | yes | identical | — | — | — |
+| *भारत की राजधानी क्या है?* | identical | yes | identical | — | — | — |
+| *मुझे एक छोटी कहानी सुनाओ।* | agreed, parted at token 24 | **no** | reproduces all of it | 43 | 8.375 / 10.36 (0.81) | clear |
+| *What is the capital of India?* | identical | yes | identical | — | — | — |
+| *थोड़ा धीरे बोलो please…* | disagreed at token 2 | **no** | **identical** | — | — | — |
+
+**The rule's arithmetic:** one divergence, at 0.81 of its median, so `clear`,
+so "a defect, the engine is not adopted".
+
+**Why it does not stand, so the verdict is undecided:**
+
+- *The one divergence is where the engine was stopped, not where it chose.*
+  The parity report says the engine's repetition guard ended the story at 43
+  generated tokens (`stopped_on_repetition: true`). The reference's first 43
+  tokens reproduce the served text exactly, then it goes on repeating the
+  same *बर्फ के*; the served continuation at the divergence is empty. The rule
+  is about the step where the two decoders chose different tokens. The script
+  — the original and the fix — counts "the served text ended and the reference
+  went on" as a divergence. That is right when the engine chose to stop and
+  wrong when its guard stopped it. The pre-run note below said a `clear`
+  divergence stands either way. It did not anticipate a guard-cut text, and
+  this departs from it for that reason alone.
+- *The script's reference is not the gate's reference where it matters.* It
+  decodes with a plain Transformers loop; the gate's reference was the explicit
+  runner. The two agree on the three prompts the gate passed and disagree on
+  exactly the two it failed. On both of those the plain loop produces the
+  engine's text. The recorded divergences are between the explicit runner on
+  one side and the engine and stock Transformers on the other. This script's
+  decode never reaches that fork, so it cannot measure the margin there.
+
+**Not changed:** the gate stays failing at 4/5, and the engine is not adopted.
+Its 2.7365× remains measured and not adopted.
+
+**What the run does show:** on all five prompts the served text agrees token
+for token with a stock Transformers greedy decode of the same weights, on the
+same GPU class, in the same dtype. For the story that holds for every token
+the engine produced. The two prompts where the implementations fork also have
+the smallest top-two margins of any decode in the run: 0.047 logits, 0.5% and
+1.7% of their medians. That is consistent with near-ties, but the step of each
+minimum was not saved, so it does not show they sit at the forks. One
+untested explanation for the fork: the explicit runner passes an attention
+mask and the plain loop does not, which can route attention through a
+different kernel.
+
+**The other registered checks:**
+- *Which median.* The pooled median was not reported: per-step margins are not
+  saved, an omission in the fix. A pooled median lies between the smallest
+  and largest per-prompt medians (2.79 and 15.03), so 25% of it is at most
+  3.76, below 8.375. Either reading gives the same classification here.
+- *Runner-up.* At the one divergence none of the reference's top five tokens is
+  consistent with the served continuation, because there is none.
+
+**Next measurement (not run; it needs its own registered rule):** in one
+session, decode the five parity prompts with both the explicit runner and the
+plain loop. Save per-step token ids and top-two margins for both. Treat a
+served text ended by `stopped_on_repetition` or `stopped_by_caller` as the end
+of the comparison, not a divergence. That shows whether the explicit runner on
+this T4 still produces the recorded reference, and the margin at each fork
+in both implementations. The engine's own identity gate compares against stock
+Transformers (registered 2026-09-26). Whether this gate should too is not a
+call for this run.
+
 ## Before run 3: two defects in the margin script, found before it ran (registered 2026-09-28)
 
 Written before run 3 and committed with the fix it describes. Nothing here was

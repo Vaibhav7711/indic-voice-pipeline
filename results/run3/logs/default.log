@@ -1,0 +1,59 @@
+Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
+The tied weights mapping and config for this model specifies to tie model.embed_tokens.weight to lm_head.weight, but both are present in the checkpoints, so we will NOT tie them. You should update the config with `tie_word_embeddings=False` to silence this warning
+engine: {'engine': 'explicit', 'model': 'Qwen/Qwen3-1.7B', 'device': 'cuda', 'dtype': 'torch.float16', 'quantization': None, 'static_cache': False, 'compile_decode': False, 'temperature': 0.0, 'top_p': 1.0, 'top_k': 0, 'seed': None}
+system prompt variant: default (349 chars)
+ok    1/18 factual      भारत की राजधानी क्या है?
+        भारत की राजधानी नई दिल्ली है।
+FAIL  2/18 factual      फ्रांस की राजधानी क्या है?
+        फ्रांस की राजधानी लिस्टन है।
+FAIL  3/18 factual      जापान की राजधानी क्या है?
+        जापान की राजधानी तोकियोसहा है।
+FAIL  4/18 factual      दो और दो कितने होते हैं?
+        दो और दो दोही होते हैं।
+ok    5/18 factual      एक सप्ताह में कितने दिन होते हैं?
+        एक सप्ताह में 7 दिन होते हैं।
+FAIL  6/18 factual      सूरज किस दिशा में उगता है?
+        सूरज आकाश में उगता है।
+ok    7/18 factual      पानी का रासायनिक सूत्र क्या है?
+        पानी के रासायनिक सूत्र आमतौर पर H₂O होता है।
+FAIL  8/18 factual      भारत का राष्ट्रीय पशु कौन है?
+        भारत का राष्ट्रीय पशु बिंदौर एवं देश के अधिकांश जिलों में आम तौर पर उपयोग में लिया जाने वाला एक छोटा स
+ok    9/18 factual      हिमालय किस देश में है?
+        हिमालय भारत में है।
+FAIL 10/18 factual      ताजमहल कहाँ है?
+        ताजमहल बेंगalore में है।
+ok   11/18 instruction  मुझे एक छोटी कहानी सुनाओ।
+        एक छोटी कहानी: एक बर्फ के घंटे में एक बच्चा अपने पिता के साथ खेलता है। उसके दिमाग में बर्फ के घंटे रहते ह
+ok   12/18 instruction  थोड़ा धीरे बोलो, मुझे समझ नहीं आया।
+        चलिए थोड़ा धीरे बोलूंगा।
+ok   13/18 instruction  एक वाक्य में बताओ कि योग क्या है।
+        योग एक स्वास्थ्य प्रणाली के अंग है जिसमें शरीर और मन के स्वास्थ्य को बढ़ावा दिया जाता है।
+ok   14/18 instruction  मेरा नाम वैभव है। मेरा नाम क्या है?
+        मेरा नाम वैभव है।
+FAIL 15/18 instruction  गिनती करो: एक, दो, और आगे तीन तक।
+        1, 2, 3.
+FAIL 16/18 unanswerable आज मौसम कैसा है?
+        आज मौसम खुशी से बराबर है।
+FAIL 17/18 unanswerable अभी समय क्या है?
+        अभी समय 3:45 बजे है।
+FAIL 18/18 unanswerable मेरे बैंक खाते में कितने पैसे हैं?
+        मेरे बैंक खाते में आपका पैसा देखकर बताया जा सकता है। आपको इसे चेक करने के लिए अपनी डेटा विवरण आवश्य
+
+{
+  "cases": 18,
+  "factual_n": 10,
+  "factual_accuracy": 0.4,
+  "instruction_n": 5,
+  "instruction_obeyed": 0.8,
+  "unanswerable_n": 3,
+  "declined_rate": 0.0,
+  "looping": 0,
+  "too_long": 0,
+  "empty_or_scriptless": 1,
+  "script_ratio_cases": 16,
+  "latin_allowed_cases": 1,
+  "devanagari_ratio_mean": 0.9851190476190477,
+  "mean_chars": 40.94444444444444
+}
+report: results/answer_quality/greedy_run3.json
+Apply the pre-registered rule in docs/EXPERIMENTS.md; this harness does not decide.

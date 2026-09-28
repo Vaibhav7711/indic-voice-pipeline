@@ -1,0 +1,21 @@
+loading the reference in float16…
+Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
+The tied weights mapping and config for this model specifies to tie model.embed_tokens.weight to lm_head.weight, but both are present in the checkpoints, so we will NOT tie them. You should update the config with `tie_word_embeddings=False` to silence this warning
+  नमस्ते, आज मौसम कैसा है?                   step 3, margin 8.250 vs median 6.516 -> clear
+  भारत की राजधानी क्या है?                   step 1, margin 13.594 vs median 10.391 -> clear
+  मुझे एक छोटी कहानी सुनाओ।                  step 2, margin 6.312 vs median 10.359 -> clear
+  What is the capital of India?              agreed throughout
+  थोड़ा धीरे बोलो please, मुझे समझ नहीं आय   step 3, margin 7.047 vs median 2.789 -> clear
+
+{
+  "prompts": 5,
+  "diverged": 4,
+  "judged": 4,
+  "near_tie": 0,
+  "clear": 4,
+  "near_tie_rate": 0.0,
+  "consistent_with_fp16_noise": false
+}
+report: results/engine_parity/logit_margins_edfe2e7.json
+
+At least one divergence is NOT a near-tie -- the engine chose a token the reference considered clearly worse. That is a defect to investigate, not rounding.

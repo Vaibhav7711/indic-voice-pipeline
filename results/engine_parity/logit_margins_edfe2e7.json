@@ -1,0 +1,68 @@
+{
+  "note": "Kaggle Tesla T4 (sm_75), float16, commit edfe2e7, script as committed, run as a module since the documented form cannot start, explaining the 4/5 parity run",
+  "model": "Qwen/Qwen3-1.7B",
+  "dtype": "float16",
+  "near_tie_fraction": 0.25,
+  "parity_report": "results/engine_parity/parity.json",
+  "summary": {
+    "prompts": 5,
+    "diverged": 4,
+    "judged": 4,
+    "near_tie": 0,
+    "clear": 4,
+    "near_tie_rate": 0.0,
+    "consistent_with_fp16_noise": false
+  },
+  "findings": [
+    {
+      "prompt": "नमस्ते, आज मौसम कैसा है?",
+      "steps": 18,
+      "diverged_at_step": 3,
+      "margin_at_divergence": 8.25,
+      "median_margin": 6.515625,
+      "min_margin": 0.140625,
+      "verdict": "clear",
+      "reference_prefix_at_divergence": "आज म"
+    },
+    {
+      "prompt": "भारत की राजधानी क्या है?",
+      "steps": 29,
+      "diverged_at_step": 1,
+      "margin_at_divergence": 13.59375,
+      "median_margin": 10.390625,
+      "min_margin": 1.375,
+      "verdict": "clear",
+      "reference_prefix_at_divergence": "भ"
+    },
+    {
+      "prompt": "मुझे एक छोटी कहानी सुनाओ।",
+      "steps": 96,
+      "diverged_at_step": 2,
+      "margin_at_divergence": 6.3125,
+      "median_margin": 10.359375,
+      "min_margin": 0.046875,
+      "verdict": "clear",
+      "reference_prefix_at_divergence": "एक"
+    },
+    {
+      "prompt": "What is the capital of India?",
+      "steps": 9,
+      "diverged_at_step": null,
+      "margin_at_divergence": null,
+      "median_margin": 15.03125,
+      "min_margin": 1.9375,
+      "verdict": "unknown",
+      "reference_prefix_at_divergence": ""
+    },
+    {
+      "prompt": "थोड़ा धीरे बोलो please, मुझे समझ नहीं आया।",
+      "steps": 32,
+      "diverged_at_step": 3,
+      "margin_at_divergence": 7.046875,
+      "median_margin": 2.7890625,
+      "min_margin": 0.046875,
+      "verdict": "clear",
+      "reference_prefix_at_divergence": "चलो"
+    }
+  ]
+}

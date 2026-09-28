@@ -1,0 +1,59 @@
+Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
+The tied weights mapping and config for this model specifies to tie model.embed_tokens.weight to lm_head.weight, but both are present in the checkpoints, so we will NOT tie them. You should update the config with `tie_word_embeddings=False` to silence this warning
+engine: {'engine': 'explicit', 'model': 'Qwen/Qwen3-1.7B', 'device': 'cuda', 'dtype': 'torch.float16', 'quantization': None, 'static_cache': False, 'compile_decode': False, 'temperature': 0.0, 'top_p': 1.0, 'top_k': 0, 'seed': None}
+system prompt variant: grounded (548 chars)
+ok    1/18 factual      भारत की राजधानी क्या है?
+        भारत की राजधानी नई दिल्ली है।
+FAIL  2/18 factual      फ्रांस की राजधानी क्या है?
+        फ्रांस की राजधानी बर्गेर है।
+FAIL  3/18 factual      जापान की राजधानी क्या है?
+        जापान की राजधानी टोकियो है।
+ok    4/18 factual      दो और दो कितने होते हैं?
+        चार होते हैं।
+ok    5/18 factual      एक सप्ताह में कितने दिन होते हैं?
+        7 दिन होते हैं।
+FAIL  6/18 factual      सूरज किस दिशा में उगता है?
+        सूरज ऊर्ध्वदिशा में उगता है।
+ok    7/18 factual      पानी का रासायनिक सूत्र क्या है?
+        H2O एक पानी का रासायनिक सूत्र है।
+FAIL  8/18 factual      भारत का राष्ट्रीय पशु कौन है?
+        भारत का राष्ट्रीय पशु बिंदौर है।
+ok    9/18 factual      हिमालय किस देश में है?
+        हिमालय भारत में है।
+FAIL 10/18 factual      ताजमहल कहाँ है?
+        ताजमहल इंग्लैंड के ब्रिटिश राज्य में है।
+ok   11/18 instruction  मुझे एक छोटी कहानी सुनाओ।
+        अच्छा, एक छोटी कहानी: एक बच्चा एक दिन खेल रहा था और एक दिन उसके घर आ गया। वह बच्चा बड़ा हो गया और
+ok   12/18 instruction  थोड़ा धीरे बोलो, मुझे समझ नहीं आया।
+        अच्छा, मुझे भी अब इतना धीरे बोलना आवश्यक है कि मुझे अपने विश्वास के अनुसार अपने दृष्टिकोण के अनुसार �
+ok   13/18 instruction  एक वाक्य में बताओ कि योग क्या है।
+        योग एक शारीरिक, दिमागी और भावनात्मक ध्यान एवं नियंत्रण के एक तरीका है, जिसके द्वारा आत्म-आध्यात्मि�
+ok   14/18 instruction  मेरा नाम वैभव है। मेरा नाम क्या है?
+        मेरा नाम वैभव है।
+FAIL 15/18 instruction  गिनती करो: एक, दो, और आगे तीन तक।
+        1, 2, 3.
+ok   16/18 unanswerable आज मौसम कैसा है?
+        अब के बारे में आज का मौसम देखने के लिए आपको जानकारी नहीं है।
+FAIL 17/18 unanswerable अभी समय क्या है?
+        अभी समय नहीं बताया जा सकता।
+ok   18/18 unanswerable मेरे बैंक खाते में कितने पैसे हैं?
+        मेरे बैंक खाते में पैसे की जानकारी नहीं है।
+
+{
+  "cases": 18,
+  "factual_n": 10,
+  "factual_accuracy": 0.5,
+  "instruction_n": 5,
+  "instruction_obeyed": 0.8,
+  "unanswerable_n": 3,
+  "declined_rate": 0.6666666666666666,
+  "looping": 0,
+  "too_long": 0,
+  "empty_or_scriptless": 1,
+  "script_ratio_cases": 16,
+  "latin_allowed_cases": 1,
+  "devanagari_ratio_mean": 1.0,
+  "mean_chars": 39.77777777777778
+}
+report: results/answer_quality/grounded.json
+Apply the pre-registered rule in docs/EXPERIMENTS.md; this harness does not decide.

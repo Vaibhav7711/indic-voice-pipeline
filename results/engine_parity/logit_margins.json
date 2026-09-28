@@ -1,0 +1,133 @@
+{
+  "note": "Kaggle Tesla T4 (sm_75), float16, commit 186a530, explaining the 4/5 parity run",
+  "model": "Qwen/Qwen3-1.7B",
+  "dtype": "float16",
+  "near_tie_fraction": 0.25,
+  "parity_report": "results/engine_parity/parity.json",
+  "summary": {
+    "prompts": 5,
+    "diverged": 1,
+    "judged": 1,
+    "near_tie": 0,
+    "clear": 1,
+    "near_tie_rate": 0.0,
+    "consistent_with_fp16_noise": false
+  },
+  "findings": [
+    {
+      "prompt": "नमस्ते, आज मौसम कैसा है?",
+      "steps": 18,
+      "diverged_at_step": null,
+      "margin_at_divergence": null,
+      "median_margin": 6.515625,
+      "min_margin": 0.140625,
+      "verdict": "unknown",
+      "reference_prefix_at_divergence": "",
+      "reference_text": "आज मौसम बराबर है।",
+      "matches_recorded_reference": true,
+      "bytes_reproduce_decode": true,
+      "stopped_on_eos": true,
+      "at_divergence": null
+    },
+    {
+      "prompt": "भारत की राजधानी क्या है?",
+      "steps": 29,
+      "diverged_at_step": null,
+      "margin_at_divergence": null,
+      "median_margin": 10.390625,
+      "min_margin": 1.375,
+      "verdict": "unknown",
+      "reference_prefix_at_divergence": "",
+      "reference_text": "भारत की राजधानी नई दिल्ली है।",
+      "matches_recorded_reference": true,
+      "bytes_reproduce_decode": true,
+      "stopped_on_eos": true,
+      "at_divergence": null
+    },
+    {
+      "prompt": "मुझे एक छोटी कहानी सुनाओ।",
+      "steps": 96,
+      "diverged_at_step": 43,
+      "margin_at_divergence": 8.375,
+      "median_margin": 10.359375,
+      "min_margin": 0.046875,
+      "verdict": "clear",
+      "reference_prefix_at_divergence": "एक छोटी कहानी: एक बर्फ के बर्फ के बर्फ के बर्फ क",
+      "reference_text": "एक छोटी कहानी: एक बर्फ के बर्फ के बर्फ के बर्फ के बर्फ के बर्फ के बर्फ के बर्फ के बर्फ के बर्फ के बर्फ के बर",
+      "matches_recorded_reference": false,
+      "bytes_reproduce_decode": true,
+      "stopped_on_eos": false,
+      "at_divergence": {
+        "served_continuation": "",
+        "top": [
+          {
+            "token_id": 34370,
+            "text": "े",
+            "bytes": "e0a587",
+            "logit": 33.65625,
+            "consistent_with_served": false
+          },
+          {
+            "token_id": 23868,
+            "text": "ा",
+            "bytes": "e0a4be",
+            "logit": 25.28125,
+            "consistent_with_served": false
+          },
+          {
+            "token_id": 43647,
+            "text": "ी",
+            "bytes": "e0a580",
+            "logit": 25.109375,
+            "consistent_with_served": false
+          },
+          {
+            "token_id": 54575,
+            "text": "ो",
+            "bytes": "e0a58b",
+            "logit": 23.34375,
+            "consistent_with_served": false
+          },
+          {
+            "token_id": 54784,
+            "text": "े�",
+            "bytes": "e0a587e0a4",
+            "logit": 21.203125,
+            "consistent_with_served": false
+          }
+        ],
+        "served_token": null
+      }
+    },
+    {
+      "prompt": "What is the capital of India?",
+      "steps": 9,
+      "diverged_at_step": null,
+      "margin_at_divergence": null,
+      "median_margin": 15.03125,
+      "min_margin": 1.9375,
+      "verdict": "unknown",
+      "reference_prefix_at_divergence": "",
+      "reference_text": "The capital of India is New Delhi.",
+      "matches_recorded_reference": true,
+      "bytes_reproduce_decode": true,
+      "stopped_on_eos": true,
+      "at_divergence": null
+    },
+    {
+      "prompt": "थोड़ा धीरे बोलो please, मुझे समझ नहीं आया।",
+      "steps": 32,
+      "diverged_at_step": null,
+      "margin_at_divergence": null,
+      "median_margin": 2.7890625,
+      "min_margin": 0.046875,
+      "verdict": "unknown",
+      "reference_prefix_at_divergence": "",
+      "reference_text": "चलो तुम्हें बिना बारी बोलूंगा।",
+      "matches_recorded_reference": false,
+      "bytes_reproduce_decode": true,
+      "stopped_on_eos": true,
+      "at_divergence": null
+    }
+  ]
+}
