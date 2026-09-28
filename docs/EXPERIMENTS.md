@@ -553,6 +553,78 @@ until a speakable unit, not TTS synthesis. The live records do not record the
 selected LLM, TTS backend, GPU, or notebook commit, so this is a real
 distribution but not a configuration-comparison result.
 
+## Before run 3: two defects in the margin script, found before it ran (registered 2026-09-28)
+
+Written before run 3 and committed with the fix it describes. Nothing here was
+learned from a model run; the evidence is the tokenizer and the committed
+parity report.
+
+**The documented command could not run.** `python scripts/logit_margins.py …`
+puts `scripts/` on the import path, not the repo root, and `scripts` is not an
+installed package, so it failed at `from scripts.engine_parity import
+system_language` — after reading the parity report, before loading a model
+(checked in an editable install: `ModuleNotFoundError: No module named
+'scripts'`). The tests import it through pytest's rootdir, which is why the
+suite passed. Fixed with the `sys.path` line `scripts/streaming_demo.py`
+already uses. Changes nothing measured.
+
+**It would have located divergences that do not exist.** It compared each
+step's decoded text with the served text. Qwen3's tokenizer splits a Devanagari
+character across tokens often: tokenizing the four Hindi served answers, the
+first step ending inside a character is token 3, 1, 2 and 3, and the English
+answer has none. A step ending inside a character decodes to U+FFFD, which is
+never a prefix of real text, so the script reports a divergence there. On the
+two Hindi answers the gate recorded as *byte-identical* that is a divergence
+that does not exist; on the story it is token 2 where the texts part at token
+24; only on *थोड़ा धीरे बोलो*, which parts at token 2, do the two coincide. The
+margins compared would mostly have been those of unrelated steps. Three
+smaller cases fail the same way: both engines strip their output and the raw
+decode does not; a reference that stops (end of sequence) where the served text
+goes on was never seen; and a text cut inside a character by the token cap ends
+in U+FFFD, which no reference bytes match.
+
+The fix compares cumulative UTF-8 bytes of the generated tokens with the
+served text's bytes, ignores the whitespace the engines strip, treats
+stopping early as a divergence at the stopping step, and treats a served
+text's cut final character as unknown rather than different. On the parity report's
+own texts (canonical tokenization) it finds no divergence on the three
+identical answers and locates the two real ones at tokens 24 and 2.
+
+**What the fix does not change:** the margin (top-1 minus top-2 logit of the
+same step), the per-prompt median it is compared with, `NEAR_TIE_FRACTION =
+0.25`, `classify`, `summarise`, and unanimity. **What it adds, beside the
+verdict:** the regenerated reference text and whether it equals the recorded
+one; a check that the byte walk reproduces the decode (if not, that prompt's
+verdict is `unknown`); and at each divergence the reference's top five tokens,
+whether each is consistent with the served continuation, and where the served
+text's own next token ranks.
+
+**Prediction for the committed script**, which run 3 also runs unchanged (as a
+module, since the documented form cannot start): it reports a divergence on
+all four Hindi prompts, including the two byte-identical ones, and agreement
+only on the English one.
+
+**How the ambiguities are handled, decided now:**
+
+- *Control for the grounded arm.* Rescoring the committed answers with the
+  current harness reproduces factual / instruction / declined = 0.4 / 0.8 / 0.0
+  for all four run-2 arms (only the script ratio moved, from the `H₂O`
+  exclusion, and the rule does not use it). The rule is applied against
+  `greedy.json` as registered. Run 3 also runs the `default` variant in the
+  same session: if its three rates differ from `greedy.json`, the environment
+  moved, the grounded verdict is reported against both controls, and if the two
+  disagree it is recorded as undecided.
+- *Which median.* "That run's median margin" is operationalised as the script
+  does it, per prompt. The median pooled over every step of every prompt is
+  reported beside it; if the two readings give different verdicts, undecided.
+- *Whether the margin measures the engine's choice.* The top-two margin reads
+  as a near-tie only if the served text continued with the reference's
+  runner-up. If every divergence is a near-tie by the arithmetic but at one of
+  them the runner-up is not consistent with the served continuation
+  (`at_divergence.top[1].consistent_with_served` false), the margin measured a
+  tie the engine did not take part in, and the verdict is undecided. A `clear`
+  divergence stands either way.
+
 ## Pre-registered: the grounded system prompt, and the parity margins (registered 2026-09-26)
 
 Both registered after run 2 and before either is run. Run 2 refuted the
