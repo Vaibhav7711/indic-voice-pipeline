@@ -21,6 +21,26 @@ the evidence.
 Exit status is 0 only if every prompt matched to the configured tolerance, so
 this is usable as a gate rather than something to read and nod at.
 
+**The two sides must decode under the same rule, and once did not.** This gate
+ran for three sessions comparing `LLMRunner`, whose `repetition_penalty`
+defaults to **1.1**, against a server that applies none -- `HttpLLMEngine` sends
+`temperature: 0.0` and omits the penalty, so the engine decodes at 1.0. Both are
+"greedy" in the sense of taking an argmax, over differently transformed logits,
+and `LLMRunner` penalises every token in the **prompt** as well (`seen` starts
+as the prompt's ids), so the objective differs from the very first step.
+
+The recorded evidence shows it plainly: on the story prompt the reference
+produced *…एक बर्फ के घंटे में…* and the engine *…एक बर्फ के बर्फ के…*, diverging
+exactly where the phrase repeats. The reference had seen those tokens and the
+penalty demoted them. That is not fp16 rounding, and an independent run found
+the engine reproduces a plain Transformers greedy loop byte for byte on all five
+prompts -- which is the expected result once the penalty is accounted for.
+
+`--repetition-penalty` therefore defaults to **1.0** here, applied to the
+reference, and is recorded in the report. The gate's job is to isolate the
+engine's *numerics*, and it cannot do that while one side is running a different
+decoding algorithm.
+
 **What a mismatch does and does not prove.** Divergence late in a long
 response is expected and is not a defect: fp16 attention is not associative,
 so two implementations can rank the top two candidates differently at one
@@ -259,6 +279,13 @@ def main(argv: list[str] | None = None) -> int:
                              "reasons that have nothing to do with the engine. "
                              "Defaults to float16 because that is what "
                              "llm/engines/server_app.py serves")
+    parser.add_argument("--repetition-penalty", type=float, default=1.0,
+                        help="applied to the reference. 1.0 matches what the "
+                             "served engine does, which is what makes this a "
+                             "comparison of numerics rather than of decoding "
+                             "rules. LLMRunner's own default is 1.1, and this "
+                             "gate silently compared 1.1 against 1.0 for three "
+                             "sessions")
     parser.add_argument("--skip-vram-check", action="store_true",
                         help="load the reference copy even when the preflight "
                              "says it will not fit beside the server's copy")
@@ -295,6 +322,10 @@ def main(argv: list[str] | None = None) -> int:
     reference, tokenizer, reference_info = build_llm(
         "explicit", model=args.llm_model, device=args.device,
         dtype=getattr(torch, args.dtype))
+    # Set after construction: build_llm does not take it, and the default of
+    # 1.1 is what made three runs of this gate incomparable.
+    reference.repetition_penalty = args.repetition_penalty
+    reference_info["repetition_penalty"] = args.repetition_penalty
     print(f"  {reference_info}", flush=True)
     if args.dtype not in reference_info.get("dtype", ""):
         print(f"  WARNING: asked for {args.dtype}, loaded "
@@ -367,6 +398,10 @@ def main(argv: list[str] | None = None) -> int:
         # report that does not state both dtypes cannot be checked for it
         # later.
         "reference_dtype_requested": args.dtype,
+        # Recorded because a mismatch here invalidates the comparison outright,
+        # and the report has to let that be checked afterwards.
+        "reference_repetition_penalty": args.repetition_penalty,
+        "served_repetition_penalty": getattr(served, "repetition_penalty", 1.0),
         "reference": reference_info,
         "served": served_info,
         "probe": probe,

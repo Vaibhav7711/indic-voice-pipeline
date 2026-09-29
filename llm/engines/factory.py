@@ -75,6 +75,7 @@ def build_llm(
     top_p: float = 1.0,
     top_k: int = 0,
     presence_penalty: float = 0.0,
+    repetition_penalty: float | None = None,
     seed: int | None = None,
     base_url: str | None = None,
     api_key: str | None = None,
@@ -135,6 +136,8 @@ def build_llm(
             api_key=api_key, chat=chat, tokenizer=tokenizer, extra_body=extra_body,
             temperature=temperature, top_p=top_p, top_k=top_k,
             presence_penalty=presence_penalty, seed=seed,
+            repetition_penalty=1.0 if repetition_penalty is None
+            else repetition_penalty,
         )
         return generator, tokenizer, {"engine": "http", "model": model,
                                       "endpoint": generator.endpoint, "chat": chat,
@@ -142,7 +145,11 @@ def build_llm(
                                       "temperature": temperature, "top_p": top_p,
                                       "top_k": top_k,
                                       "presence_penalty": presence_penalty,
-                                      "seed": seed}
+                                      "seed": seed,
+                                      # Recorded for both engines so swapping
+                                      # tiers cannot change the decoding rule
+                                      # without it showing up in a log.
+                                      "repetition_penalty": generator.repetition_penalty}
 
     from llm import LLMRunner, load_llm
 
@@ -151,10 +158,12 @@ def build_llm(
     # two different sets of numerics, and two greedy decoders over different
     # numerics diverge for reasons that say nothing about either engine.
     loaded = load_llm(model, device=device, dtype=dtype, quantization=quantization)
+    runner_kwargs = {} if repetition_penalty is None else {
+        "repetition_penalty": repetition_penalty}
     generator = LLMRunner(loaded.model, loaded.tokenizer, loaded.device,
                           static_cache=static_cache, compile_decode=compile_decode,
                           temperature=temperature, top_p=top_p, top_k=top_k,
-                          seed=seed)
+                          seed=seed, **runner_kwargs)
     return generator, loaded.tokenizer, {
         "engine": "explicit", "model": model, "device": str(loaded.device),
         "dtype": str(loaded.dtype), "quantization": loaded.quantization,
@@ -163,4 +172,8 @@ def build_llm(
         # decode greedily, and these are what say whether they did.
         "temperature": temperature, "top_p": top_p, "top_k": top_k,
         "seed": seed,
+        # LLMRunner's default is 1.1 and the HTTP engine's is 1.0, so the two
+        # tiers decode differently unless a caller matches them. Recorded here
+        # so a swap is visible rather than inferred.
+        "repetition_penalty": generator.repetition_penalty,
     }

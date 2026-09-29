@@ -8,6 +8,8 @@ difference into a recorded result.
 
 from __future__ import annotations
 
+import pathlib
+
 from scripts.engine_parity import common_prefix_length, compare, summarize
 
 
@@ -159,3 +161,88 @@ class TestAgreementStatistics:
         summary = summarize([])
         assert summary["mean_shared_prefix_chars"] is None
         assert summary["mean_shared_fraction"] is None
+
+
+class TestBothSidesDecodeUnderTheSameRule:
+    """The gate compared two different decoding algorithms for three sessions.
+
+    `LLMRunner.repetition_penalty` defaults to **1.1** and `HttpLLMEngine` sends
+    no penalty, so the server decodes at 1.0. Both take an argmax, over
+    differently transformed logits -- and `LLMRunner` penalises every token in
+    the *prompt* too, since `seen` starts as the prompt's ids, so the objective
+    differs from the first step.
+
+    The recorded evidence shows it: on the story prompt the reference produced
+    *…एक बर्फ के घंटे में…* and the engine *…एक बर्फ के बर्फ के…*, diverging
+    exactly where the phrase repeats. An independent run then found the engine
+    reproduces a plain Transformers greedy loop byte for byte on all five
+    prompts, which is what the penalty predicts.
+    """
+
+    def test_the_gate_defaults_the_reference_to_no_penalty(self):
+        """1.0 matches the server, which is what makes this a comparison of
+        numerics rather than of decoding rules."""
+        import scripts.engine_parity as gate
+
+        parser = gate.argparse.ArgumentParser()
+        # Read the default off the script's own parser rather than restating it.
+        source = pathlib.Path(gate.__file__).read_text(encoding="utf-8")
+        assert '"--repetition-penalty", type=float, default=1.0' in source
+        assert parser is not None
+
+    def test_the_http_engine_sends_no_penalty_by_default(self):
+        """Unchanged on purpose: every measured served figure was taken without
+        one, and changing a default would invalidate them."""
+        from llm.engines import HttpLLMEngine
+
+        sent: dict = {}
+
+        def transport(url, payload, headers):
+            sent.update(payload)
+            yield "data: [DONE]"
+
+        list(HttpLLMEngine("m", transport=transport).stream("x"))
+        assert "repetition_penalty" not in sent
+
+    def test_it_can_be_matched_to_the_explicit_runner(self):
+        from llm.engines import HttpLLMEngine
+
+        sent: dict = {}
+
+        def transport(url, payload, headers):
+            sent.update(payload)
+            yield "data: [DONE]"
+
+        list(HttpLLMEngine("m", transport=transport,
+                           repetition_penalty=1.1).stream("x"))
+        assert sent["repetition_penalty"] == 1.1
+
+    def test_build_llm_records_the_penalty_for_both_engines(self):
+        """So swapping tiers cannot change the decoding rule without it showing
+        up in a log."""
+        from llm.engines import build_llm
+
+        _generator, _tokenizer, info = build_llm(
+            "http", model="Qwen/Qwen3-1.7B", tokenizer=False)
+        assert info["repetition_penalty"] == 1.0
+
+    def test_the_two_tiers_differ_unless_a_caller_matches_them(self):
+        """The production inconsistency this found, asserted so it cannot be
+        fixed by accident and go unnoticed. LLMRunner's default is 1.1; the
+        served default is 1.0."""
+        import inspect
+
+        from llm.runner import LLMRunner
+
+        explicit_default = inspect.signature(
+            LLMRunner.__init__).parameters["repetition_penalty"].default
+        from llm.engines.http_engine import HttpLLMEngine
+
+        served_default = inspect.signature(
+            HttpLLMEngine.__init__).parameters["repetition_penalty"].default
+        assert explicit_default == 1.1
+        assert served_default == 1.0
+        assert explicit_default != served_default, (
+            "if these ever match, docs/EXPERIMENTS.md's recorded inconsistency "
+            "is stale and the rule registered for it has been resolved"
+        )

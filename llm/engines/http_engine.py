@@ -168,6 +168,7 @@ class HttpLLMEngine:
         top_p: float = 1.0,
         top_k: int = 0,
         presence_penalty: float = 0.0,
+        repetition_penalty: float = 1.0,
         seed: int | None = None,
         extra_body: dict | None = None,
         transport: Callable[[str, dict, dict], Iterator[str]] | None = None,
@@ -203,6 +204,13 @@ class HttpLLMEngine:
         self.top_p = top_p
         self.top_k = top_k
         self.presence_penalty = presence_penalty
+        #: Left at 1.0, which is the server's own default and what every
+        #: measured served number was taken under. `LLMRunner` defaults to
+        #: 1.1, so the two serving tiers decode under different rules unless a
+        #: caller matches them -- a production inconsistency recorded in
+        #: docs/EXPERIMENTS.md with its own rule, not fixed by quietly changing
+        #: a default that measurements already depend on.
+        self.repetition_penalty = repetition_penalty
         self.seed = seed
         self.extra_body = dict(extra_body or {})
         # The timeout is bound here rather than added to the transport
@@ -238,6 +246,8 @@ class HttpLLMEngine:
             body["top_k"] = self.top_k
         if self.presence_penalty:
             body["presence_penalty"] = self.presence_penalty
+        if self.repetition_penalty != 1.0:
+            body["repetition_penalty"] = self.repetition_penalty
         if self.seed is not None:
             body["seed"] = self.seed
         if self.stop:

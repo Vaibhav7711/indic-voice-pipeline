@@ -341,6 +341,14 @@ same text. The gate compares the first 24 characters, because that is what the
 user hears before the first unit reaches TTS, and reports full-text identity
 separately.
 
+**Superseded — read `docs/EXPERIMENTS.md` §"Correction: the parity gate
+compared two decoding rules".** The failures this gate recorded were a
+configuration mismatch, not numerics: `LLMRunner` penalises repetition at 1.1
+and the served engine does not penalise at all, so the two sides ran different
+decoding algorithms. `--repetition-penalty` now defaults to 1.0 on the
+reference. The paragraph below describes a real effect that was not the cause
+here.
+
 Late divergence is expected and is not a defect: fp16 attention is not
 associative, so two implementations can rank the top two candidates
 differently at one step and then follow equally valid continuations. Early

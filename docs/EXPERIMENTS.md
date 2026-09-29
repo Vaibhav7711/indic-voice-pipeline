@@ -765,6 +765,87 @@ only on the English one.
   tie the engine did not take part in, and the verdict is undecided. A `clear`
   divergence stands either way.
 
+## Correction: the parity gate compared two decoding rules, not two engines (2026-09-29)
+
+**This supersedes the near-tie framing in every section above.** The parity
+gate's failures were not fp16 rounding and were not the engine. They were a
+configuration mismatch in the gate itself, introduced when it was written and
+carried through three sessions of interpretation.
+
+`LLMRunner.repetition_penalty` defaults to **1.1**, applied in `_select` before
+the argmax. `HttpLLMEngine` sends `temperature: 0.0` and no penalty, so the
+server decodes at **1.0** — its own default. Both sides take an argmax; they
+take it over differently transformed logits. And `LLMRunner` seeds `seen` with
+the prompt's token ids, so it penalises every token in the prompt *and* the
+system prompt, which means the objective differs from the very first decode
+step, not only after a repeat.
+
+The committed evidence shows it without needing a new run:
+
+```
+prompt: मुझे एक छोटी कहानी सुनाओ।
+ref: एक छोटी कहानी: एक बर्फ के घंटे में एक बच्चा…    ← did not repeat
+srv: एक छोटी कहानी: एक बर्फ के बर्फ के बर्फ के…       ← repeated
+```
+
+Divergence at character 26 — exactly where `बर्फ के` recurs. The reference had
+seen those tokens and the penalty demoted them. The other failing prompt
+diverged at character **2**, which prompt-wide penalisation explains and which
+no plausible amount of fp16 noise does.
+
+Run 3's central observation is the confirmation rather than a puzzle: a plain
+Transformers greedy loop — no penalty — reproduces the **served** text byte for
+byte on all five prompts, while the recorded reference differs from it on
+exactly the two prompts the gate failed. Penalised greedy is the outlier. The
+engine was never shown defective, and the hypothesis offered for it (an
+attention-mask difference) is not needed; for a single unpadded sequence an
+all-ones mask is equivalent to none.
+
+**What this invalidates.** Every statement above that reads the 3/5 or 4/5
+agreement as evidence about fp16 near-ties, chunked-prefill accumulation order,
+or logit margins. The margins were measured on the wrong comparison: the fixed
+script's plain loop has no penalty, which is *why* it matched the served text,
+so it could not reach the forks the gate recorded. Run 3's "undecided" verdict
+was the right call on the evidence it had.
+
+**What it does not invalidate.** The latency numbers. `2.7365×` was measured
+with each tier in its own configuration, which is what a user would get, and no
+part of it depends on the gate. The UTF-8 corruption finding and its fix stand
+untouched. Run 3's two script defects were real and are fixed.
+
+### The fix, and the production inconsistency underneath it
+
+`scripts/engine_parity.py --repetition-penalty` now defaults to **1.0**,
+applied to the reference and recorded in the report alongside the served side's
+value. The gate's job is to isolate the engine's numerics, which it cannot do
+while one side runs a different algorithm.
+
+The deeper problem is not in the gate. **The two serving tiers decode
+differently in production**: `--llm-engine explicit` penalises at 1.1,
+`--llm-engine http` does not penalise at all. Swapping tiers therefore changes
+the model's behaviour, not just its speed — which is precisely what the
+correctness policy exists to prevent. `HttpLLMEngine` now accepts
+`repetition_penalty` and `build_llm` records the effective value for both
+engines so a mismatch appears in a log rather than being inferred. The default
+is left at 1.0 deliberately: every served figure was measured without a
+penalty, and changing a default would invalidate them silently.
+
+- *Registered rule for resolving it, before the run:* re-run the gate with
+  `--repetition-penalty 1.0`. If agreement reaches **5/5**, the engine is
+  equivalent to the reference under matched decoding and is adopted at its
+  measured 2.7365×; the serving tiers are then aligned by setting the HTTP
+  engine's penalty to 1.1 to match `LLMRunner`, and the latency sweep is re-run
+  once under matched penalties before any ratio is restated.
+- *If agreement is below 5/5 under matched decoding*, the residue is a genuine
+  numerics difference and the margin measurement becomes meaningful — run it
+  against a reference configured the same way, not a plain loop.
+- *Prediction:* 5/5. The story prompt's divergence is fully explained by the
+  penalty, and a plain loop already matches the served text on every prompt.
+- *What the sweep's ratio means in the meantime:* it compares each tier as
+  configured, which is honest about what a user gets and silent about why they
+  differ. Do not restate it as "the same model, served faster" until the
+  penalties are aligned and it is re-measured.
+
 ## Pre-registered: the grounded system prompt, and the parity margins (registered 2026-09-26)
 
 Both registered after run 2 and before either is run. Run 2 refuted the

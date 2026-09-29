@@ -202,7 +202,7 @@
     "results/answer_quality/grounded.json": "e1408e766a7424a3896ded5ca68307fbb89eef20b27269f14d2e01bf0f688a91",
     "results/answer_quality/greedy_run3.json": "798bb1d609230682b7821e9c302124931899ff2943f69bac47a09b76e54f38cf",
     "results/engine_parity/logit_margins.json": "40d58832ee98308047cad6b119f2ca199b3f854dc1d0e7e9340f991ce2479ee1",
-    "results/engine_parity/logit_margins_edfe2e7.json": "12bc32fc5073a0c07860ad814b517d134d07be5945950743b91bf4fce5128593",
-    "results/engine_parity/logit_margins_documented_edfe2e7.json": null
-  }
+    "results/engine_parity/logit_margins_edfe2e7.json": "12bc32fc5073a0c07860ad814b517d134d07be5945950743b91bf4fce5128593"
+  },
+  "notes": "The manifest previously listed results/engine_parity/logit_margins_documented_edfe2e7.json with a null checksum; that file was never committed and the run's unmodified-script output is results/engine_parity/logit_margins_edfe2e7.json, which is listed and verifies. Removed rather than left as an entry naming a file that does not exist."
 }
