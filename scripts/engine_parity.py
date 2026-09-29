@@ -171,6 +171,37 @@ def compare(reference: str, served: str, *, prefix_chars: int) -> dict:
     }
 
 
+def reuse_served(path: str, model: str) -> tuple[dict[str, str], dict]:
+    """Served answers from an earlier report, with the checks that make reuse
+    valid.
+
+    Raises `ValueError` with the reason. Called before the reference model is
+    loaded: a bad path or a mismatched report should cost a second, not the two
+    minutes it takes to bring up a 1.7B checkpoint.
+    """
+    source = Path(path)
+    if not source.is_file():
+        raise ValueError(f"{source} does not exist")
+    earlier = json.loads(source.read_text(encoding="utf-8"))
+    if earlier.get("model") != model:
+        raise ValueError(
+            f"{source} served {earlier.get('model')!r} and this run is "
+            f"{model!r}. Reusing its answers would compare a reference against "
+            f"a different model's output")
+    temperature = (earlier.get("served") or {}).get("temperature", 0.0)
+    if temperature:
+        raise ValueError(
+            f"{source} was served at temperature {temperature}, so its answers "
+            f"are one sample rather than a decode this run can be compared "
+            f"against")
+    results = earlier.get("results") or []
+    if not results:
+        raise ValueError(f"{source} records no results to reuse")
+    return ({item["prompt"]: item["served"] for item in results},
+            dict(earlier.get("served") or {}, reused_from=str(source),
+                 reused_note=earlier.get("note", "")))
+
+
 def vram_preflight(model: str, *, free_gib: float | None) -> dict:
     """Will the reference copy fit beside the one the server already holds?
 
@@ -279,6 +310,15 @@ def main(argv: list[str] | None = None) -> int:
                              "reasons that have nothing to do with the engine. "
                              "Defaults to float16 because that is what "
                              "llm/engines/server_app.py serves")
+    parser.add_argument("--served-from", default=None, metavar="PARITY_JSON",
+                        help="reuse the served answers recorded in an earlier "
+                             "report instead of querying a server. The served "
+                             "side is a deterministic greedy decode, so when "
+                             "only the reference's configuration is in question "
+                             "this re-answers it without an engine checkout, a "
+                             "running server, or a second copy of the weights. "
+                             "The model, dtype and sampling recorded in that "
+                             "report must match this run, and are checked")
     parser.add_argument("--repetition-penalty", type=float, default=1.0,
                         help="applied to the reference. 1.0 matches what the "
                              "served engine does, which is what makes this a "
@@ -294,6 +334,17 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--note", default="")
     args = parser.parse_args(argv)
 
+    recorded: dict[str, str] = {}
+    reused_info: dict = {}
+    if args.served_from:
+        try:
+            recorded, reused_info = reuse_served(args.served_from, args.llm_model)
+        except ValueError as error:
+            print(f"error: {error}.", file=sys.stderr)
+            return 2
+        print(f"reusing {len(recorded)} served answers from "
+              f"{args.served_from}", flush=True)
+
     import torch
 
     from llm.engines import build_llm
@@ -302,7 +353,13 @@ def main(argv: list[str] | None = None) -> int:
     # The server already holds one copy of these weights; this process is about
     # to load a second. Say whether that fits before spending two minutes
     # finding out.
+    # With --served-from nothing else holds the weights, so the second-copy
+    # cost the preflight guards against does not apply.
     preflight = vram_preflight(args.llm_model, free_gib=free_vram_gib())
+    if args.served_from:
+        preflight["note"] = ("served answers reused; no second copy of the "
+                             "weights is resident")
+        preflight["fits"] = True
     print(f"vram preflight: {preflight}", flush=True)
     if preflight["fits"] is False:
         print(
@@ -331,13 +388,18 @@ def main(argv: list[str] | None = None) -> int:
         print(f"  WARNING: asked for {args.dtype}, loaded "
               f"{reference_info.get('dtype')}", flush=True)
 
-    print("connecting to the served engine…", flush=True)
-    served, _, served_info = build_llm(
-        "http", model=args.llm_model, base_url=args.llm_base_url,
-        api_key=args.llm_api_key, tokenizer=tokenizer)
-    print(f"  {served_info}", flush=True)
-    probe = served.probe()
-    print(f"  probe: {probe}", flush=True)
+    if args.served_from:
+        served, served_info = None, reused_info
+        probe = {"reused": True, "prompts": len(recorded)}
+        print(f"  {served_info}", flush=True)
+    else:
+        print("connecting to the served engine…", flush=True)
+        served, _, served_info = build_llm(
+            "http", model=args.llm_model, base_url=args.llm_base_url,
+            api_key=args.llm_api_key, tokenizer=tokenizer)
+        print(f"  {served_info}", flush=True)
+        probe = served.probe()
+        print(f"  probe: {probe}", flush=True)
     if probe.get("replacement_chars"):
         # The probe prompt is Devanagari, so this is known before a single
         # comparison runs. Say it now: everything printed below would otherwise
@@ -360,7 +422,16 @@ def main(argv: list[str] | None = None) -> int:
         prompt = build_chat_prompt(tokenizer, system_prompt_for(language), question)
         reference_text = reference.generate(
             prompt, max_new_tokens=args.max_new_tokens).text
-        served_text = served.generate(prompt, max_new_tokens=args.max_new_tokens).text
+        if served is None:
+            if question not in recorded:
+                print(f"error: {args.served_from} has no answer for "
+                      f"{question!r}; the prompt set has changed since it ran.",
+                      file=sys.stderr)
+                return 2
+            served_text = recorded[question]
+        else:
+            served_text = served.generate(
+                prompt, max_new_tokens=args.max_new_tokens).text
         comparison = compare(reference_text, served_text,
                              prefix_chars=args.prefix_chars)
         results.append({
@@ -370,7 +441,8 @@ def main(argv: list[str] | None = None) -> int:
             "served": served_text,
             "comparison": comparison,
             "served_metrics": (served.last_metrics.as_dict()
-                               if served.last_metrics else None),
+                               if served is not None and served.last_metrics
+                               else None),
         })
         mark = "CORRUPT" if comparison["corruption"] else (
             "ok  " if comparison["agreed"] else "FAIL")
@@ -402,6 +474,7 @@ def main(argv: list[str] | None = None) -> int:
         # and the report has to let that be checked afterwards.
         "reference_repetition_penalty": args.repetition_penalty,
         "served_repetition_penalty": getattr(served, "repetition_penalty", 1.0),
+        "served_reused_from": args.served_from,
         "reference": reference_info,
         "served": served_info,
         "probe": probe,

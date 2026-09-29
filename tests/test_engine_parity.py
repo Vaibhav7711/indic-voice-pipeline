@@ -8,9 +8,15 @@ difference into a recorded result.
 
 from __future__ import annotations
 
+import json
 import pathlib
 
-from scripts.engine_parity import common_prefix_length, compare, summarize
+from scripts.engine_parity import (
+    common_prefix_length,
+    compare,
+    reuse_served,
+    summarize,
+)
 
 
 class TestCommonPrefix:
@@ -246,3 +252,81 @@ class TestBothSidesDecodeUnderTheSameRule:
             "if these ever match, docs/EXPERIMENTS.md's recorded inconsistency "
             "is stale and the rule registered for it has been resolved"
         )
+
+
+class TestReusingRecordedServedAnswers:
+    """`--served-from` answers the reference-side question without a server.
+
+    The served side is a deterministic greedy decode at temperature 0, so when
+    only the reference's configuration is in doubt -- which is exactly the
+    repetition-penalty mismatch -- re-querying the engine would reproduce the
+    same text. Reusing the recorded answers removes the engine checkout, the
+    running server, and the second copy of the weights from the critical path,
+    and compares against the very text that produced the recorded failure.
+
+    It is only sound while the served configuration is unchanged, so the model
+    and the sampling are checked rather than assumed.
+    """
+
+    def _report(self, tmp_path, **overrides):
+        report = {
+            "model": "Qwen/Qwen3-1.7B",
+            "served": {"engine": "http", "temperature": 0.0},
+            "results": [{"prompt": "भारत की राजधानी क्या है?",
+                         "served": "भारत की राजधानी नई दिल्ली है।"}],
+        }
+        report.update(overrides)
+        path = tmp_path / "parity.json"
+        path.write_text(json.dumps(report, ensure_ascii=False), encoding="utf-8")
+        return path
+
+    def test_a_different_model_is_refused(self, tmp_path, capsys):
+        from scripts.engine_parity import main
+
+        path = self._report(tmp_path, model="Qwen/Qwen3-0.6B")
+        assert main(["--served-from", str(path), "--llm-model",
+                     "Qwen/Qwen3-1.7B"]) == 2
+        assert "different model" in capsys.readouterr().err
+
+    def test_a_sampled_run_is_refused(self, tmp_path, capsys):
+        """Its answers are one sample, not a decode to compare against."""
+        from scripts.engine_parity import main
+
+        path = self._report(tmp_path,
+                            served={"engine": "http", "temperature": 0.7})
+        assert main(["--served-from", str(path)]) == 2
+        assert "one sample" in capsys.readouterr().err
+
+    def test_a_missing_report_is_an_error_not_a_crash(self, tmp_path, capsys):
+        from scripts.engine_parity import main
+
+        assert main(["--served-from", str(tmp_path / "nope.json")]) == 2
+        assert "does not exist" in capsys.readouterr().err
+
+    def test_an_empty_report_is_refused(self, tmp_path, capsys):
+        """A report with no results would run the reference against nothing and
+        report perfect agreement over zero prompts."""
+        from scripts.engine_parity import main
+
+        assert main(["--served-from", str(self._report(tmp_path, results=[]))
+                     ]) == 2
+        assert "no results" in capsys.readouterr().err
+
+    def test_it_returns_the_recorded_answers(self, tmp_path):
+        """The happy path, on the function the CLI delegates to."""
+        recorded, info = reuse_served(str(self._report(tmp_path)),
+                                      "Qwen/Qwen3-1.7B")
+        assert recorded["भारत की राजधानी क्या है?"].startswith("भारत")
+        assert info["reused_from"].endswith("parity.json")
+
+    def test_the_committed_report_is_reusable(self):
+        """The one this will actually be run against."""
+        recorded, info = reuse_served(
+            "results/engine_parity/parity.json", "Qwen/Qwen3-1.7B")
+        assert len(recorded) == 5
+        assert all(recorded.values())
+        assert info["temperature"] == 0.0
+        report = json.loads(
+            pathlib.Path("results/engine_parity/parity.json").read_text(
+                encoding="utf-8"))
+        assert report["model"] == "Qwen/Qwen3-1.7B"
